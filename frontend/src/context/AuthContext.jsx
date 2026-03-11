@@ -1,3 +1,4 @@
+// frontend/src/context/AuthContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, setToken, getToken } from "../api.js";
 
@@ -8,29 +9,49 @@ export function AuthProvider({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const t = getToken();
-    if (!t) return setReady(true);
+    let alive = true;
 
-    api.me()
-      .then((res) => setUser(res.user))
-      .catch(() => { setToken(""); setUser(null); })
-      .finally(() => setReady(true));
+    async function bootstrap() {
+      const t = getToken();
+      if (!t) {
+        if (alive) setReady(true);
+        return;
+      }
+
+      try {
+        const res = await api.me();
+        if (alive) setUser(res.user);
+      } catch {
+        setToken("");
+        if (alive) setUser(null);
+      } finally {
+        if (alive) setReady(true);
+      }
+    }
+
+    bootstrap();
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  const value = useMemo(() => ({
-    user,
-    ready,
-    async login(email, password) {
-      const res = await api.login({ email, password });
-      setToken(res.access_token);
-      setUser(res.user);
-      return res.user;
-    },
-    logout() {
-      setToken("");
-      setUser(null);
-    }
-  }), [user, ready]);
+  const value = useMemo(
+    () => ({
+      user,
+      ready,
+      async login(email, password) {
+        const res = await api.login({ email, password });
+        setToken(res.access_token);
+        setUser(res.user);
+        return res.user;
+      },
+      logout() {
+        setToken("");
+        setUser(null);
+      },
+    }),
+    [user, ready]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

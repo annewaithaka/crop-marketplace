@@ -1,3 +1,4 @@
+# backend/app/routes/crops.py
 """
 Crop listing routes.
 """
@@ -16,7 +17,7 @@ bp = Blueprint("crops", __name__)
 ALLOWED_UNITS = {"kg", "bag"}
 
 
-def _parse_positive_float(value, field_name: str):
+def _parse_positive_float(value, field_name: str) -> float:
     try:
         f = float(value)
     except (TypeError, ValueError):
@@ -36,14 +37,28 @@ def list_crops():
 
     q = Crop.query
     conds = []
+
     if name:
         conds.append(Crop.name.ilike(f"%{name}%"))
     if location:
         conds.append(Crop.location.ilike(f"%{location}%"))
+
+    errors = {}
     if min_price not in (None, ""):
-        conds.append(Crop.price_per_unit >= float(min_price))
+        try:
+            conds.append(Crop.price_per_unit >= float(min_price))
+        except (TypeError, ValueError):
+            errors["min_price"] = "min_price must be a number"
+
     if max_price not in (None, ""):
-        conds.append(Crop.price_per_unit <= float(max_price))
+        try:
+            conds.append(Crop.price_per_unit <= float(max_price))
+        except (TypeError, ValueError):
+            errors["max_price"] = "max_price must be a number"
+
+    if errors:
+        return {"error": "validation failed", "errors": errors}, 400
+
     if conds:
         q = q.filter(and_(*conds))
 
@@ -64,7 +79,9 @@ def list_crops():
                 "name": farmer.name,
                 "email": farmer.email,
                 "phone": farmer.phone,
-            } if farmer else None,
+            }
+            if farmer
+            else None,
         }
 
     return {"items": [to_dict(c) for c in crops]}
@@ -82,16 +99,36 @@ def create_crop():
     quantity_raw = payload.get("quantity")
     price_raw = payload.get("price_per_unit")
 
-    if not name or not location or quantity_raw is None or price_raw is None or not unit:
-        return {"error": "name, location, unit, quantity, price_per_unit are required"}, 400
+    errors = {}
+    if not name:
+        errors["name"] = "Crop name is required."
+    if not location:
+        errors["location"] = "Location is required."
+    if not unit:
+        errors["unit"] = "Unit is required."
+    if quantity_raw is None:
+        errors["quantity"] = "Quantity is required."
+    if price_raw is None:
+        errors["price_per_unit"] = "Price per unit is required."
+
+    if errors:
+        return {"error": "validation failed", "errors": errors}, 400
+
     if unit not in ALLOWED_UNITS:
-        return {"error": f"unit must be one of: {', '.join(sorted(ALLOWED_UNITS))}"}, 400
+        return {
+            "error": "validation failed",
+            "errors": {"unit": f"Unit must be one of: {', '.join(sorted(ALLOWED_UNITS))}"},
+        }, 400
 
     try:
         quantity = _parse_positive_float(quantity_raw, "quantity")
+    except ValueError as e:
+        return {"error": "validation failed", "errors": {"quantity": str(e)}}, 400
+
+    try:
         price_per_unit = _parse_positive_float(price_raw, "price_per_unit")
     except ValueError as e:
-        return {"error": str(e)}, 400
+        return {"error": "validation failed", "errors": {"price_per_unit": str(e)}}, 400
 
     crop = Crop(
         farmer_id=uid,
@@ -111,15 +148,20 @@ def create_crop():
 def my_crops():
     uid = int(get_jwt_identity())
     crops = Crop.query.filter_by(farmer_id=uid).order_by(Crop.created_at.desc()).all()
-    return {"items": [{
-        "id": c.id,
-        "name": c.name,
-        "quantity": c.quantity,
-        "unit": c.unit,
-        "price_per_unit": c.price_per_unit,
-        "location": c.location,
-        "created_at": c.created_at.isoformat(),
-    } for c in crops]}
+    return {
+        "items": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "quantity": c.quantity,
+                "unit": c.unit,
+                "price_per_unit": c.price_per_unit,
+                "location": c.location,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in crops
+        ]
+    }
 
 
 @bp.put("/<int:crop_id>")
@@ -134,23 +176,30 @@ def update_crop(crop_id: int):
 
     if "name" in payload and payload["name"] is not None:
         crop.name = str(payload["name"]).strip()
+
     if "location" in payload and payload["location"] is not None:
         crop.location = str(payload["location"]).strip()
+
     if "unit" in payload and payload["unit"] is not None:
         unit = str(payload["unit"]).strip().lower()
         if unit not in ALLOWED_UNITS:
-            return {"error": f"unit must be one of: {', '.join(sorted(ALLOWED_UNITS))}"}, 400
+            return {
+                "error": "validation failed",
+                "errors": {"unit": f"Unit must be one of: {', '.join(sorted(ALLOWED_UNITS))}"},
+            }, 400
         crop.unit = unit
+
     if "quantity" in payload and payload["quantity"] is not None:
         try:
             crop.quantity = _parse_positive_float(payload["quantity"], "quantity")
         except ValueError as e:
-            return {"error": str(e)}, 400
+            return {"error": "validation failed", "errors": {"quantity": str(e)}}, 400
+
     if "price_per_unit" in payload and payload["price_per_unit"] is not None:
         try:
             crop.price_per_unit = _parse_positive_float(payload["price_per_unit"], "price_per_unit")
         except ValueError as e:
-            return {"error": str(e)}, 400
+            return {"error": "validation failed", "errors": {"price_per_unit": str(e)}}, 400
 
     db.session.commit()
     return {"message": "updated"}

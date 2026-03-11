@@ -1,3 +1,4 @@
+#backend/app/routes/auth.py
 """
 Auth routes: register/login/me.
 """
@@ -13,6 +14,7 @@ from app.services.security import hash_password, verify_password
 bp = Blueprint("auth", __name__)
 
 
+# backend/app/routes/auth.py (PATCH)
 @bp.post("/register")
 def register():
     payload = request.get_json(force=True) or {}
@@ -22,12 +24,21 @@ def register():
     role = (payload.get("role") or "").strip().lower()
     password = payload.get("password") or ""
 
+    errors = {}
+    if not name:
+        errors["name"] = "Full name is required."
+    if not email:
+        errors["email"] = "Email is required."
+    if not password:
+        errors["password"] = "Password is required."
     if role not in {"farmer", "buyer"}:
-        return {"error": "role must be farmer or buyer"}, 400
-    if not name or not email or not password:
-        return {"error": "name, email, password are required"}, 400
+        errors["role"] = "Role must be farmer or buyer."
+
+    if errors:
+        return {"error": "validation failed", "errors": errors}, 400
+
     if User.query.filter_by(email=email).first():
-        return {"error": "email already registered"}, 409
+        return {"error": "email already registered", "errors": {"email": "Email already registered."}}, 409
 
     user = User(
         name=name,
@@ -40,7 +51,6 @@ def register():
     db.session.add(user)
     db.session.commit()
     return {"message": "registered"}, 201
-
 
 @bp.post("/login")
 def login():

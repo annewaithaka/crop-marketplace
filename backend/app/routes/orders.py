@@ -1,3 +1,4 @@
+# backend/app/routes/orders.py
 """
 Order routes.
 """
@@ -13,7 +14,7 @@ from app.utils.authz import require_roles
 bp = Blueprint("orders", __name__)
 
 
-def _parse_positive_float(value, field_name: str):
+def _parse_positive_float(value, field_name: str) -> float:
     try:
         f = float(value)
     except (TypeError, ValueError):
@@ -33,8 +34,16 @@ def create_order():
     quantity_requested_raw = payload.get("quantity_requested")
     contact_details = (payload.get("contact_details") or "").strip()
 
-    if not crop_id or quantity_requested_raw is None or not contact_details:
-        return {"error": "crop_id, quantity_requested, contact_details are required"}, 400
+    errors = {}
+    if not crop_id:
+        errors["crop_id"] = "crop_id is required."
+    if quantity_requested_raw is None:
+        errors["quantity_requested"] = "quantity_requested is required."
+    if not contact_details:
+        errors["contact_details"] = "contact_details is required."
+
+    if errors:
+        return {"error": "validation failed", "errors": errors}, 400
 
     crop = Crop.query.get(int(crop_id))
     if not crop:
@@ -43,7 +52,15 @@ def create_order():
     try:
         quantity_requested = _parse_positive_float(quantity_requested_raw, "quantity_requested")
     except ValueError as e:
-        return {"error": str(e)}, 400
+        return {"error": "validation failed", "errors": {"quantity_requested": str(e)}}, 400
+
+    if quantity_requested > crop.quantity:
+        return {
+            "error": "validation failed",
+            "errors": {
+                "quantity_requested": f"Requested quantity exceeds available ({crop.quantity} {crop.unit})."
+            },
+        }, 400
 
     order = Order(
         crop_id=crop.id,
@@ -62,21 +79,26 @@ def create_order():
 def my_orders():
     uid = int(get_jwt_identity())
     orders = Order.query.filter_by(buyer_id=uid).order_by(Order.created_at.desc()).all()
-    return {"items": [{
-        "id": o.id,
-        "crop": {
-            "id": o.crop.id,
-            "name": o.crop.name,
-            "location": o.crop.location,
-            "price_per_unit": o.crop.price_per_unit,
-            "unit": o.crop.unit,
-            "farmer_id": o.crop.farmer_id,
-        },
-        "quantity_requested": o.quantity_requested,
-        "contact_details": o.contact_details,
-        "status": o.status,
-        "created_at": o.created_at.isoformat(),
-    } for o in orders]}
+    return {
+        "items": [
+            {
+                "id": o.id,
+                "crop": {
+                    "id": o.crop.id,
+                    "name": o.crop.name,
+                    "location": o.crop.location,
+                    "price_per_unit": o.crop.price_per_unit,
+                    "unit": o.crop.unit,
+                    "farmer_id": o.crop.farmer_id,
+                },
+                "quantity_requested": o.quantity_requested,
+                "contact_details": o.contact_details,
+                "status": o.status,
+                "created_at": o.created_at.isoformat(),
+            }
+            for o in orders
+        ]
+    }
 
 
 @bp.get("/incoming")
@@ -89,15 +111,25 @@ def incoming_orders():
         .order_by(Order.created_at.desc())
         .all()
     )
-    return {"items": [{
-        "id": o.id,
-        "crop": {"id": o.crop.id, "name": o.crop.name, "location": o.crop.location, "unit": o.crop.unit},
-        "buyer_id": o.buyer_id,
-        "quantity_requested": o.quantity_requested,
-        "contact_details": o.contact_details,
-        "status": o.status,
-        "created_at": o.created_at.isoformat(),
-    } for o in orders]}
+    return {
+        "items": [
+            {
+                "id": o.id,
+                "crop": {
+                    "id": o.crop.id,
+                    "name": o.crop.name,
+                    "location": o.crop.location,
+                    "unit": o.crop.unit,
+                },
+                "buyer_id": o.buyer_id,
+                "quantity_requested": o.quantity_requested,
+                "contact_details": o.contact_details,
+                "status": o.status,
+                "created_at": o.created_at.isoformat(),
+            }
+            for o in orders
+        ]
+    }
 
 
 @bp.put("/<int:order_id>/status")
@@ -105,8 +137,9 @@ def incoming_orders():
 def update_status(order_id: int):
     payload = request.get_json(force=True) or {}
     status = (payload.get("status") or "").strip().lower()
+
     if status not in {"pending", "accepted", "rejected", "completed"}:
-        return {"error": "invalid status"}, 400
+        return {"error": "validation failed", "errors": {"status": "invalid status"}}, 400
 
     order = Order.query.get(order_id)
     if not order:

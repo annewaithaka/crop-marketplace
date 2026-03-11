@@ -68,23 +68,9 @@ a:hover{ text-decoration:underline; }
   border-bottom: 1px solid var(--border);
 }
 
-.nav-inner{
-  padding: 16px 0;          /* a bit taller */
-  gap: 16px;
-}
-
 .brand{
-  font-size: 1.1rem;        /* ~20px */
+  font-size: 1.15rem;       /* slightly larger than links */
   font-weight: 900;
-}
-
-.nav-inner a{
-          /* ~18px */
-  font-weight: 800;
-  font-size: clamp(22px, 3vw, 23px);
-  line-height: 1;
-  letter-spacing: -0.5px;
-  margin: 0;
 }
 
 .pill{
@@ -96,11 +82,48 @@ a:hover{ text-decoration:underline; }
   font-size: 1rem;          /* ~18px */
   padding: 10px 14px;
 }
+
 .nav-inner{
   width: min(var(--maxw), calc(100% - 32px));
   margin: 0 auto;
   display:flex;
   align-items:center;
+  padding: 16px 0;        
+  gap: 16px;
+}
+
+/* Nav links layout */
+.nav-links{
+  display:flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.nav-link{
+  font-weight: 800;
+  font-size: 1rem;        /* matches body */
+  line-height: 1.1;
+  letter-spacing: -0.2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.nav-link:hover{
+  text-decoration: none;
+  background: color-mix(in srgb, var(--panel2) 70%, transparent);
+}
+
+.nav-link-active{
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.nav-actions{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .brand{ font-weight: 900; letter-spacing: 0.2px; }
@@ -127,11 +150,14 @@ a:hover{ text-decoration:underline; }
 .grid{ display:grid; gap: 14px; }
 .row{ display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
 
-h1,h2,h3{ margin: 0 0 10px; }
-h2{ h2{ font-size: 1.4rem; }                 /* ~25px */
-.section-headline{ font-size: 1.7rem; }  /* ~31px */
-.hero-sub{ font-size: 1.05rem; }         /* ~19px */
-}
+h1, h2, h3 { margin: 0 0 10px; }
+
+h1 { font-size: 2rem; line-height: 1.15; }
+h2 { font-size: 1.55rem; line-height: 1.2; }   /* readable, not huge */
+h3 { font-size: 1.2rem; line-height: 1.25; }
+
+.section-headline { font-size: 1.7rem; }
+.hero-sub { font-size: 1.05rem; }
 
 .small{
   font-size: 0.95rem;   /* ~17px */
@@ -139,7 +165,7 @@ h2{ h2{ font-size: 1.4rem; }                 /* ~25px */
   line-height: 1.7;
 }
 
-label{ font-size: 13px; color: var(--muted); }
+label{ font-size: 0.95rem; color: var(--muted); font-weight: 700; }
 
 .input, .select, .textarea{
   width: 100%;
@@ -372,3 +398,93 @@ label{ font-size: 13px; color: var(--muted); }
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Page header */
+.page-header{
+  display:flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.page-title{
+  margin:0;
+  font-size: 1.45rem;
+}
+.page-subtitle{
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+.page-header-right{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items:center;
+}
+
+/* Empty states */
+.empty-state{
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--panel) 65%, transparent);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.empty-title{
+  font-weight: 900;
+  font-size: 1.05rem;
+}
+.empty-msg{
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.empty-action{ margin-top: 12px; }
+
+/* Spinner */
+.spinner{
+  display:inline-block;
+  border-radius: 999px;
+  border: 3px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 75%, transparent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin{ to { transform: rotate(360deg); } }
+
+/* Toasts */
+.toast-viewport{
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  gap: 10px;
+  width: min(420px, calc(100vw - 28px));
+  z-index: 50;
+}
+.toast{
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+.toast-head{
+  display:flex;
+  justify-content: space-between;
+  align-items:center;
+  gap: 10px;
+}
+.toast-title{ font-weight: 900; }
+.toast-msg{ margin-top: 6px; color: var(--muted); line-height: 1.5; }
+.toast-x{
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.toast-success{ border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.toast-error{ border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.toast-warning{ border-color: color-mix(in srgb, var(--accent2) 55%, var(--border)); }

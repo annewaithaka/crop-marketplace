@@ -1,3 +1,4 @@
+#backend/app/routes/admin.py
 """
 Admin routes.
 """
@@ -32,7 +33,7 @@ def set_user_active(user_id: int):
     payload = request.get_json(force=True) or {}
     is_active = payload.get("is_active")
     if is_active is None:
-        return {"error": "is_active is required"}, 400
+        return {"error": "validation failed", "errors": {"is_active": "is_active is required"}}, 400    
 
     u = User.query.get(user_id)
     if not u:
