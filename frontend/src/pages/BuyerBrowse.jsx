@@ -4,7 +4,6 @@ import { api } from "../api.js";
 import PageHeader from "../components/PageHeader.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import { useToast } from "../context/ToastContext.jsx";
-import ListingMedia from "../components/ListingMedia.jsx";
 import Lightbox from "../components/Lightbox.jsx";
 
 function toNumber(value) {
@@ -12,49 +11,50 @@ function toNumber(value) {
   return Number(value);
 }
 
-function ListingGallery({ crop }) {
+/**
+ * Thumbnails-only gallery (no big image).
+ * Clicking any thumbnail opens the lightbox.
+ */
+function ListingGalleryThumbs({ crop }) {
   const images = crop?.images || [];
-  const [activeIdx, setActiveIdx] = useState(0);
   const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
-    setActiveIdx(0);
     setOpen(false);
+    setActiveIdx(0);
   }, [crop?.id]);
 
-  const active = images[activeIdx]?.url || images[0]?.url || "";
+  if (images.length === 0) return null;
 
-  if (!active) return null;
+  const active = images[activeIdx]?.url || images[0]?.url;
 
   return (
     <>
-      <ListingMedia
-        src={active}
-        alt={`${crop.name} image`}
-        fit="cover"
-        onClick={() => setOpen(true)}
-      />
-
-      {images.length > 1 && (
-        <div className="thumb-row" aria-label="Listing thumbnails">
-          {images.map((img, idx) => (
-            <div
-              key={img.id ?? `${img.url}-${idx}`}
-              className={`thumb ${idx === activeIdx ? "thumb-active" : ""}`}
-              onClick={() => setActiveIdx(idx)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") setActiveIdx(idx);
-              }}
-              aria-label={`Thumbnail ${idx + 1}`}
-              title={`Image ${idx + 1}`}
-            >
-              <img src={img.url} alt={`${crop.name} thumbnail ${idx + 1}`} loading="lazy" />
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="thumb-row" aria-label="Listing thumbnails">
+        {images.map((img, idx) => (
+          <div
+            key={img.id ?? `${img.url}-${idx}`}
+            className={`thumb ${idx === activeIdx ? "thumb-active" : ""}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              setActiveIdx(idx);
+              setOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                setActiveIdx(idx);
+                setOpen(true);
+              }
+            }}
+            aria-label={`Open image ${idx + 1}`}
+            title={`Open image ${idx + 1}`}
+          >
+            <img src={img.url} alt={`${crop.name} thumbnail ${idx + 1}`} loading="lazy" />
+          </div>
+        ))}
+      </div>
 
       <Lightbox
         open={open}
@@ -235,7 +235,7 @@ export default function BuyerBrowse() {
 
             return (
               <div key={c.id} className="card listing-card">
-                <ListingGallery crop={c} />
+                <ListingGalleryThumbs crop={c} />
 
                 <div className="kv">
                   <strong>{c.name}</strong>

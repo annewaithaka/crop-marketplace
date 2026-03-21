@@ -44,9 +44,8 @@ export default function Nav() {
 
           {user?.role === "farmer" && (
             <>
-              <AppNavLink to="/farmer" end>
-                My Crops
-              </AppNavLink>
+              <AppNavLink to="/farmer/listings">My Listings</AppNavLink>
+              <AppNavLink to="/farmer/add">Add Listing</AppNavLink>
               <AppNavLink to="/farmer/orders">Incoming Orders</AppNavLink>
             </>
           )}
