@@ -30,12 +30,26 @@ class Crop(db.Model):
 
     name = db.Column(db.String(120), nullable=False, index=True)
     quantity = db.Column(db.Float, nullable=False)
-    unit = db.Column(db.String(10), nullable=False, default="kg")  # kg|bag
+    unit = db.Column(db.String(10), nullable=False, default="kg")  # kg|bag|crate
     price_per_unit = db.Column(db.Float, nullable=False, index=True)
     location = db.Column(db.String(160), nullable=False, index=True)
+
+    pack_size_kg = db.Column(db.Float, nullable=True)
+    min_order_qty = db.Column(db.Float, nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     orders = db.relationship("Order", backref="crop", lazy=True, cascade="all, delete-orphan")
+    images = db.relationship("CropImage", backref="crop", lazy=True, cascade="all, delete-orphan")
+
+
+class CropImage(db.Model):
+    __tablename__ = "crop_images"
+
+    id = db.Column(db.Integer, primary_key=True)
+    crop_id = db.Column(db.Integer, db.ForeignKey("crops.id"), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)  # stored relative path inside uploads
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Order(db.Model):

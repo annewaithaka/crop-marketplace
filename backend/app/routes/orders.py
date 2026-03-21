@@ -1,4 +1,3 @@
-# backend/app/routes/orders.py
 """
 Order routes.
 """
@@ -54,6 +53,12 @@ def create_order():
     except ValueError as e:
         return {"error": "validation failed", "errors": {"quantity_requested": str(e)}}, 400
 
+    if crop.min_order_qty is not None and quantity_requested < crop.min_order_qty:
+        return {
+            "error": "validation failed",
+            "errors": {"quantity_requested": f"Minimum order is {crop.min_order_qty} {crop.unit}."},
+        }, 400
+
     if quantity_requested > crop.quantity:
         return {
             "error": "validation failed",
@@ -90,6 +95,8 @@ def my_orders():
                     "price_per_unit": o.crop.price_per_unit,
                     "unit": o.crop.unit,
                     "farmer_id": o.crop.farmer_id,
+                    "pack_size_kg": o.crop.pack_size_kg,
+                    "min_order_qty": o.crop.min_order_qty,
                 },
                 "quantity_requested": o.quantity_requested,
                 "contact_details": o.contact_details,
@@ -120,6 +127,8 @@ def incoming_orders():
                     "name": o.crop.name,
                     "location": o.crop.location,
                     "unit": o.crop.unit,
+                    "pack_size_kg": o.crop.pack_size_kg,
+                    "min_order_qty": o.crop.min_order_qty,
                 },
                 "buyer_id": o.buyer_id,
                 "quantity_requested": o.quantity_requested,

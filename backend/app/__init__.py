@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, abort, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_sqlalchemy import SQLAlchemy
@@ -20,7 +20,6 @@ jwt = JWTManager()
 
 
 def _load_env(app: Flask) -> None:
-    # deterministic: backend/.env
     env_path = Path(app.root_path).parent / ".env"
     if env_path.exists():
         load_dotenv(dotenv_path=env_path)
@@ -37,7 +36,6 @@ def _ensure_sqlite_dir(db_uri: str) -> None:
         Path(abs_path).parent.mkdir(parents=True, exist_ok=True)
         return
 
-    # sqlite:///relative/path.db
     rel = db_uri.replace("sqlite:///", "")
     Path(rel).parent.mkdir(parents=True, exist_ok=True)
 
@@ -59,6 +57,11 @@ def create_app() -> Flask:
     db.init_app(app)
     jwt.init_app(app)
 
+    upload_dir = Path(app.instance_path) / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    app.config["UPLOAD_FOLDER"] = str(upload_dir)
+    app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8MB total request
+
     from app.models import User  # noqa: F401
     from app.routes.auth import bp as auth_bp
     from app.routes.crops import bp as crops_bp
@@ -73,10 +76,21 @@ def create_app() -> Flask:
     with app.app_context():
         db.create_all()
         from app.services.bootstrap import ensure_admin_user
+
         ensure_admin_user()
 
     @app.get("/api/health")
     def health():
         return {"status": "ok"}
+
+    @app.get("/uploads/<path:filename>")
+    def uploads(filename: str):
+        root = Path(app.config["UPLOAD_FOLDER"])
+        safe_path = (root / filename).resolve()
+        if root not in safe_path.parents and safe_path != root:
+            abort(404)
+        if not safe_path.exists():
+            abort(404)
+        return send_from_directory(root, filename)
 
     return app
