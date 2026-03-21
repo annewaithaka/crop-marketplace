@@ -5,6 +5,13 @@ import PageHeader from "../components/PageHeader.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 
+function allowedActions(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "pending") return { accept: true, reject: true, complete: false };
+  if (s === "accepted") return { accept: false, reject: true, complete: true };
+  return { accept: false, reject: false, complete: false }; // rejected/completed/unknown
+}
+
 export default function FarmerOrders() {
   const toast = useToast();
 
@@ -73,14 +80,13 @@ export default function FarmerOrders() {
           <div className="small">Loading incoming orders…</div>
         </div>
       ) : items.length === 0 ? (
-        <EmptyState
-          title="No incoming orders"
-          message="When buyers request your crops, their orders will appear here."
-        />
+        <EmptyState title="No incoming orders" message="When buyers request your crops, their orders will appear here." />
       ) : (
         <div className="grid">
           {items.map((o) => {
             const busy = updatingId === o.id;
+            const actions = allowedActions(o.status);
+            const disableAll = busy || loading;
 
             return (
               <div key={o.id} className="card">
@@ -98,30 +104,32 @@ export default function FarmerOrders() {
                 </div>
 
                 <div className="row" style={{ marginTop: 10 }}>
-                  <button
-                    className="btn good"
-                    onClick={() => setStatus(o.id, "accepted")}
-                    disabled={busy || loading}
-                    title={busy ? "Updating…" : "Accept order"}
-                  >
-                    {busy ? "Updating…" : "Accept"}
-                  </button>
+                  {actions.accept && (
+                    <button
+                      className="btn primary"
+                      onClick={() => setStatus(o.id, "accepted")}
+                      disabled={disableAll}
+                      title={busy ? "Updating…" : "Accept order"}
+                    >
+                      {busy ? "Updating…" : "Accept"}
+                    </button>
+                  )}
 
-                  <button
-                    className="btn bad"
-                    onClick={() => setStatus(o.id, "rejected")}
-                    disabled={busy || loading}
-                  >
-                    Reject
-                  </button>
+                  {actions.reject && (
+                    <button className="btn danger" onClick={() => setStatus(o.id, "rejected")} disabled={disableAll}>
+                      Reject
+                    </button>
+                  )}
 
-                  <button
-                    className="btn"
-                    onClick={() => setStatus(o.id, "completed")}
-                    disabled={busy || loading}
-                  >
-                    Complete
-                  </button>
+                  {actions.complete && (
+                    <button className="btn" onClick={() => setStatus(o.id, "completed")} disabled={disableAll}>
+                      Complete
+                    </button>
+                  )}
+
+                  {!actions.accept && !actions.reject && !actions.complete && (
+                    <span className="pill">No actions available</span>
+                  )}
                 </div>
               </div>
             );

@@ -1,13 +1,11 @@
-"""
-Order routes.
-"""
+# backend/app/routes/orders.py
 from __future__ import annotations
 
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity
 
 from app import db
-from app.models import Order, Crop
+from app.models import Order, Crop, User
 from app.utils.authz import require_roles
 
 bp = Blueprint("orders", __name__)
@@ -141,19 +139,75 @@ def incoming_orders():
     }
 
 
+def _is_transition_allowed(current: str, target: str) -> bool:
+    if current == target:
+        return True
+    if current == "pending" and target in {"accepted", "rejected"}:
+        return True
+    if current == "accepted" and target in {"completed", "rejected"}:
+        return True
+    return False
+
+
 @bp.put("/<int:order_id>/status")
 @require_roles("farmer", "admin")
 def update_status(order_id: int):
-    payload = request.get_json(force=True) or {}
-    status = (payload.get("status") or "").strip().lower()
+    uid = int(get_jwt_identity())
+    user = User.query.get(uid)
 
-    if status not in {"pending", "accepted", "rejected", "completed"}:
+    payload = request.get_json(force=True) or {}
+    target = (payload.get("status") or "").strip().lower()
+
+    if target not in {"pending", "accepted", "rejected", "completed"}:
         return {"error": "validation failed", "errors": {"status": "invalid status"}}, 400
 
     order = Order.query.get(order_id)
     if not order:
         return {"error": "not found"}, 404
 
-    order.status = status
+    crop = Crop.query.get(order.crop_id)
+    if not crop:
+        return {"error": "not found"}, 404
+
+    if user and user.role == "farmer" and crop.farmer_id != uid:
+        return {"error": "not found"}, 404
+
+    current = (order.status or "").lower()
+
+    if current in {"rejected", "completed"} and target != current:
+        return {
+            "error": "validation failed",
+            "errors": {"status": f"cannot change status from {current}"},
+        }, 400
+
+    if not _is_transition_allowed(current, target):
+        return {
+            "error": "validation failed",
+            "errors": {"status": f"invalid transition: {current} -> {target}"},
+        }, 400
+
+    if current == target:
+        return {"message": "updated"}
+
+    qty = float(order.quantity_requested)
+
+    # Reserve stock on accept
+    if current == "pending" and target == "accepted":
+        if qty > crop.quantity:
+            return {
+                "error": "validation failed",
+                "errors": {
+                    "status": f"insufficient stock to accept ({crop.quantity} {crop.unit} available)"
+                },
+            }, 400
+        crop.quantity = float(crop.quantity) - qty
+
+    # Release reserved stock if rejecting an accepted order
+    if current == "accepted" and target == "rejected":
+        crop.quantity = float(crop.quantity) + qty
+
+    # Completing an accepted order does not change quantity (already reserved on accept)
+
+    order.status = target
     db.session.commit()
     return {"message": "updated"}
