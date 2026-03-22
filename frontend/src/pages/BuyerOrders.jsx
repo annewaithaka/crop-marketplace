@@ -1,5 +1,5 @@
 // frontend/src/pages/BuyerOrders.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import PageHeader from "../components/PageHeader.jsx";
 import EmptyState from "../components/EmptyState.jsx";
@@ -8,6 +8,96 @@ import { Link } from "react-router-dom";
 
 function mapsUrl(lat, lng) {
   return `https://www.google.com/maps?q=${encodeURIComponent(lat)},${encodeURIComponent(lng)}`;
+}
+
+function MessageThread({ orderId, title = "Messages" }) {
+  const toast = useToast();
+
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await api.orderMessages(orderId);
+      setItems(res.items || []);
+    } catch (e) {
+      toast.show({ type: "error", title: "Could not load messages", message: e?.message || "Failed to load messages." });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function send(e) {
+    e.preventDefault();
+    const msg = draft.trim();
+    if (!msg) return;
+
+    setSending(true);
+    try {
+      const res = await api.sendOrderMessage(orderId, msg);
+      const item = res.item;
+      setItems((prev) => [...prev, ...(item ? [item] : [])]);
+      setDraft("");
+    } catch (e2) {
+      toast.show({ type: "error", title: "Send failed", message: e2?.message || "Could not send message." });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  useEffect(() => {
+    if (open) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  return (
+    <div className="card" style={{ marginTop: 10 }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <strong>{title}</strong>
+        <button className="btn" type="button" onClick={() => setOpen((p) => !p)}>
+          {open ? "Hide" : "Open"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="grid" style={{ marginTop: 10 }}>
+          {loading ? (
+            <div className="small">Loading messages…</div>
+          ) : items.length === 0 ? (
+            <div className="small">No messages yet.</div>
+          ) : (
+            <div className="grid" style={{ gap: 8 }}>
+              {items.map((m) => (
+                <div key={m.id} className="small" style={{ padding: 10, border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10 }}>
+                  <div className="kv">
+                    <span className="pill">{m.sender_role}</span>
+                    <span className="small">{new Date(m.created_at).toLocaleString()}</span>
+                  </div>
+                  <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{m.message}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={send} className="grid" style={{ gap: 8 }}>
+            <textarea className="textarea" placeholder="Write a message…" value={draft} onChange={(e) => setDraft(e.target.value)} />
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn primary" type="submit" disabled={sending || !draft.trim()}>
+                {sending ? "Sending…" : "Send"}
+              </button>
+              <button className="btn" type="button" onClick={load} disabled={loading || sending}>
+                Refresh messages
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function BuyerOrders() {
@@ -47,6 +137,8 @@ export default function BuyerOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const hasAny = useMemo(() => items.length > 0, [items]);
+
   return (
     <div className="container">
       <PageHeader
@@ -67,12 +159,8 @@ export default function BuyerOrders() {
         <div className="card">
           <div className="small">Loading your orders…</div>
         </div>
-      ) : items.length === 0 ? (
-        <EmptyState
-          title="No orders yet"
-          message="Browse crops and send an order request. Your requests will appear here."
-          action={<Link className="btn primary" to="/buyer">Browse crops</Link>}
-        />
+      ) : !hasAny ? (
+        <EmptyState title="No orders yet" message="Browse crops and send an order request. Your requests will appear here." action={<Link className="btn primary" to="/buyer">Browse crops</Link>} />
       ) : (
         <div className="grid">
           {items.map((o) => {
@@ -92,6 +180,18 @@ export default function BuyerOrders() {
                   Quantity requested: <b>{o.quantity_requested}</b> {o.crop?.unit}
                 </div>
 
+                {o.proposed_price != null && (
+                  <div className="small">
+                    Proposed price: <b>KES {o.proposed_price}</b> / {o.crop?.unit}
+                  </div>
+                )}
+
+                {o.delivery_notes && (
+                  <div className="small" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
+                    Delivery notes: {o.delivery_notes}
+                  </div>
+                )}
+
                 {showPickup ? (
                   <div style={{ marginTop: 10 }} className="grid">
                     <div className="small">
@@ -99,18 +199,15 @@ export default function BuyerOrders() {
                       {pickup?.county || pickup?.town ? (
                         <span>
                           {" "}
-                          — {pickup?.town || ""}{pickup?.town && pickup?.county ? ", " : ""}{pickup?.county || ""}
+                          — {pickup?.town || ""}
+                          {pickup?.town && pickup?.county ? ", " : ""}
+                          {pickup?.county || ""}
                         </span>
                       ) : null}
                     </div>
 
                     <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                      <a
-                        className="btn primary"
-                        href={mapsUrl(pickup.lat, pickup.lng)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className="btn primary" href={mapsUrl(pickup.lat, pickup.lng)} target="_blank" rel="noreferrer">
                         Open in Google Maps
                       </a>
                       <button className="btn" type="button" onClick={() => copyCoords(pickup.lat, pickup.lng)}>
@@ -127,6 +224,8 @@ export default function BuyerOrders() {
                     Pickup pin will appear after the farmer accepts your order.
                   </div>
                 )}
+
+                <MessageThread orderId={o.id} />
               </div>
             );
           })}

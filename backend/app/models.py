@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+
 from app import db
 
 
@@ -31,18 +32,14 @@ class Crop(db.Model):
     unit = db.Column(db.String(10), nullable=False, default="kg")  # kg|bag|crate|piece
     price_per_unit = db.Column(db.Float, nullable=False, index=True)
 
-    # Human-friendly string (still useful)
     location = db.Column(db.String(160), nullable=False, index=True)
 
-    # Optional (Kenya-friendly without needing a towns dataset)
     county = db.Column(db.String(80), nullable=True, index=True)
     town = db.Column(db.String(120), nullable=True, index=True)
 
-    # Required: pinned pickup location
     lat = db.Column(db.Float, nullable=True)
     lng = db.Column(db.Float, nullable=True)
 
-    # Once an order is accepted, pinned location becomes immutable
     pickup_locked = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
     pack_size_kg = db.Column(db.Float, nullable=True)
@@ -72,5 +69,29 @@ class Order(db.Model):
 
     quantity_requested = db.Column(db.Float, nullable=False)
     contact_details = db.Column(db.Text, nullable=False)
+
+    # Module 5 additions
+    proposed_price = db.Column(db.Float, nullable=True)
+    delivery_notes = db.Column(db.Text, nullable=True)
+
     status = db.Column(db.String(30), nullable=False, default="pending")  # pending|accepted|rejected|completed
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    messages = db.relationship(
+        "OrderMessage",
+        backref="order",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="OrderMessage.created_at.asc()",
+    )
+
+
+class OrderMessage(db.Model):
+    __tablename__ = "order_messages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False, index=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    sender_role = db.Column(db.String(20), nullable=False)  # buyer|farmer|admin
+    message = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

@@ -11,6 +11,10 @@ function toNumber(value) {
   return Number(value);
 }
 
+function isBlank(v) {
+  return v === null || v === undefined || String(v).trim() === "";
+}
+
 /**
  * Thumbnails-only gallery (no big image).
  * Clicking any thumbnail opens the lightbox.
@@ -56,12 +60,7 @@ function ListingGalleryThumbs({ crop }) {
         ))}
       </div>
 
-      <Lightbox
-        open={open}
-        title={`${crop.name} — image ${activeIdx + 1}/${images.length}`}
-        src={active}
-        onClose={() => setOpen(false)}
-      />
+      <Lightbox open={open} title={`${crop.name} — image ${activeIdx + 1}/${images.length}`} src={active} onClose={() => setOpen(false)} />
     </>
   );
 }
@@ -84,17 +83,13 @@ export default function BuyerBrowse() {
     town: "",
   });
 
-  // buyer-side distance filter inputs
   const [geo, setGeo] = useState({
     lat: "",
     lng: "",
     radius_km: "25",
   });
 
-  const distanceEnabled = useMemo(
-    () => geo.lat !== "" && geo.lng !== "" && geo.radius_km !== "",
-    [geo.lat, geo.lng, geo.radius_km]
-  );
+  const distanceEnabled = useMemo(() => geo.lat !== "" && geo.lng !== "" && geo.radius_km !== "", [geo.lat, geo.lng, geo.radius_km]);
 
   const [items, setItems] = useState([]);
   const [pageError, setPageError] = useState("");
@@ -104,13 +99,14 @@ export default function BuyerBrowse() {
   const [quantityRequested, setQuantityRequested] = useState("");
   const [contactDetails, setContactDetails] = useState("");
 
+  // Module 5 fields
+  const [proposedPrice, setProposedPrice] = useState("");
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+
   const [orderErrors, setOrderErrors] = useState({});
   const [placingOrder, setPlacingOrder] = useState(false);
 
-  const activeCrop = useMemo(
-    () => items.find((c) => c.id === orderCropId) || null,
-    [items, orderCropId]
-  );
+  const activeCrop = useMemo(() => items.find((c) => c.id === orderCropId) || null, [items, orderCropId]);
 
   async function load(nextFilters = filters, nextGeo = geo) {
     setPageError("");
@@ -118,9 +114,7 @@ export default function BuyerBrowse() {
     try {
       const params = {
         ...nextFilters,
-        ...(nextGeo.lat && nextGeo.lng
-          ? { lat: nextGeo.lat, lng: nextGeo.lng, radius_km: nextGeo.radius_km }
-          : {}),
+        ...(nextGeo.lat && nextGeo.lng ? { lat: nextGeo.lat, lng: nextGeo.lng, radius_km: nextGeo.radius_km } : {}),
       };
       const res = await api.listCrops(params);
       setItems(res.items || []);
@@ -142,6 +136,8 @@ export default function BuyerBrowse() {
     setOrderCropId(null);
     setQuantityRequested("");
     setContactDetails("");
+    setProposedPrice("");
+    setDeliveryNotes("");
     setOrderErrors({});
     setPlacingOrder(false);
   }
@@ -157,7 +153,14 @@ export default function BuyerBrowse() {
       next.quantity = `Minimum order is ${activeCrop.min_order_qty} ${activeCrop.unit}.`;
     }
 
+    const pp = toNumber(proposedPrice);
+    if (!isBlank(proposedPrice)) {
+      if (Number.isNaN(pp)) next.proposed_price = "Proposed price must be a number.";
+      else if (pp <= 0) next.proposed_price = "Proposed price must be greater than 0.";
+    }
+
     if (!contactDetails.trim()) next.contact = "Contact details are required (phone/email).";
+    if (deliveryNotes && deliveryNotes.length > 2000) next.delivery_notes = "Delivery notes too long (max 2000 characters).";
 
     setOrderErrors(next);
     return Object.keys(next).length === 0;
@@ -175,6 +178,8 @@ export default function BuyerBrowse() {
         crop_id: orderCropId,
         quantity_requested: Number(quantityRequested),
         contact_details: contactDetails.trim(),
+        proposed_price: isBlank(proposedPrice) ? null : Number(proposedPrice),
+        delivery_notes: deliveryNotes.trim() || null,
       });
 
       toast.show({
@@ -231,50 +236,12 @@ export default function BuyerBrowse() {
 
       <div className="card">
         <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 10 }}>
-          <input
-            className="input"
-            style={{ flex: 1, minWidth: 180 }}
-            placeholder="Name (e.g. maize)"
-            value={filters.name}
-            onChange={(e) => setFilters((p) => ({ ...p, name: e.target.value }))}
-          />
-          <input
-            className="input"
-            style={{ flex: 1, minWidth: 180 }}
-            placeholder="Location (e.g. Eldoret)"
-            value={filters.location}
-            onChange={(e) => setFilters((p) => ({ ...p, location: e.target.value }))}
-          />
-          <input
-            className="input"
-            style={{ flex: 1, minWidth: 160 }}
-            placeholder="County (optional)"
-            value={filters.county}
-            onChange={(e) => setFilters((p) => ({ ...p, county: e.target.value }))}
-          />
-          <input
-            className="input"
-            style={{ flex: 1, minWidth: 160 }}
-            placeholder="Town (optional)"
-            value={filters.town}
-            onChange={(e) => setFilters((p) => ({ ...p, town: e.target.value }))}
-          />
-          <input
-            className="input"
-            style={{ flex: 1, minWidth: 140 }}
-            placeholder="Min price"
-            inputMode="decimal"
-            value={filters.min_price}
-            onChange={(e) => setFilters((p) => ({ ...p, min_price: e.target.value }))}
-          />
-          <input
-            className="input"
-            style={{ flex: 1, minWidth: 140 }}
-            placeholder="Max price"
-            inputMode="decimal"
-            value={filters.max_price}
-            onChange={(e) => setFilters((p) => ({ ...p, max_price: e.target.value }))}
-          />
+          <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Name (e.g. maize)" value={filters.name} onChange={(e) => setFilters((p) => ({ ...p, name: e.target.value }))} />
+          <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Location (e.g. Eldoret)" value={filters.location} onChange={(e) => setFilters((p) => ({ ...p, location: e.target.value }))} />
+          <input className="input" style={{ flex: 1, minWidth: 160 }} placeholder="County (optional)" value={filters.county} onChange={(e) => setFilters((p) => ({ ...p, county: e.target.value }))} />
+          <input className="input" style={{ flex: 1, minWidth: 160 }} placeholder="Town (optional)" value={filters.town} onChange={(e) => setFilters((p) => ({ ...p, town: e.target.value }))} />
+          <input className="input" style={{ flex: 1, minWidth: 140 }} placeholder="Min price" inputMode="decimal" value={filters.min_price} onChange={(e) => setFilters((p) => ({ ...p, min_price: e.target.value }))} />
+          <input className="input" style={{ flex: 1, minWidth: 140 }} placeholder="Max price" inputMode="decimal" value={filters.max_price} onChange={(e) => setFilters((p) => ({ ...p, max_price: e.target.value }))} />
 
           <button className="btn" onClick={onSearchClick} disabled={loadingList}>
             {loadingList ? "Searching…" : "Search"}
@@ -409,6 +376,34 @@ export default function BuyerBrowse() {
                         aria-invalid={Boolean(orderErrors.quantity)}
                       />
                       {orderErrors.quantity && <div className="error">{orderErrors.quantity}</div>}
+                    </div>
+
+                    <div className="grid">
+                      <label>Proposed price (optional)</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={`e.g. ${c.price_per_unit}`}
+                        value={proposedPrice}
+                        onChange={(e) => setProposedPrice(e.target.value)}
+                        aria-invalid={Boolean(orderErrors.proposed_price)}
+                      />
+                      {orderErrors.proposed_price && <div className="error">{orderErrors.proposed_price}</div>}
+                      <div className="small">Leave blank to accept the listed price.</div>
+                    </div>
+
+                    <div className="grid">
+                      <label>Delivery notes (optional)</label>
+                      <textarea
+                        className="textarea"
+                        placeholder="Notes for the farmer (e.g. preferred pickup time)."
+                        value={deliveryNotes}
+                        onChange={(e) => setDeliveryNotes(e.target.value)}
+                        aria-invalid={Boolean(orderErrors.delivery_notes)}
+                      />
+                      {orderErrors.delivery_notes && <div className="error">{orderErrors.delivery_notes}</div>}
                     </div>
 
                     <div className="grid">

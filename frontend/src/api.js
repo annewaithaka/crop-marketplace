@@ -124,7 +124,6 @@ export const api = {
   me: () => request("/auth/me"),
 
   listCrops: (params = {}) => {
-    // Supports: name, location, county, town, min_price, max_price (and later: lat,lng,radius_km)
     const qs = new URLSearchParams(cleanParams(params)).toString();
     return request(`/crops${qs ? `?${qs}` : ""}`, { auth: false });
   },
@@ -132,11 +131,9 @@ export const api = {
   myCrops: () => request("/crops/mine"),
   createCrop: (payload) => request("/crops", { method: "POST", body: payload }),
 
-  // Listings CRUD (Farmer)
   updateCrop: (cropId, payload) => request(`/crops/${cropId}`, { method: "PUT", body: payload }),
   deleteCrop: (cropId) => request(`/crops/${cropId}`, { method: "DELETE" }),
 
-  // Images
   uploadCropImages: (cropId, files) => {
     const fd = new FormData();
     for (const f of files) fd.append("images", f);
@@ -150,6 +147,10 @@ export const api = {
   myOrders: () => request("/orders/mine"),
   incomingOrders: () => request("/orders/incoming"),
   updateOrderStatus: (id, status) => request(`/orders/${id}/status`, { method: "PUT", body: { status } }),
+
+  // Order messages (Module 5)
+  orderMessages: (orderId) => request(`/orders/${orderId}/messages`),
+  sendOrderMessage: (orderId, message) => request(`/orders/${orderId}/messages`, { method: "POST", body: { message } }),
 
   // Admin
   adminUsers: () => request("/admin/users"),

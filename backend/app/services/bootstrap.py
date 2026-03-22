@@ -59,3 +59,48 @@ def ensure_geo_columns() -> None:
 
     if alters:
         db.session.commit()
+
+
+def ensure_order_v2_columns() -> None:
+    """
+    Module 5 migration: add proposed_price + delivery_notes to orders if missing.
+    """
+    cols = db.session.execute(text("PRAGMA table_info(orders)")).mappings().all()
+    existing = {row["name"] for row in cols}
+
+    alters: list[str] = []
+    if "proposed_price" not in existing:
+        alters.append("ALTER TABLE orders ADD COLUMN proposed_price REAL")
+    if "delivery_notes" not in existing:
+        alters.append("ALTER TABLE orders ADD COLUMN delivery_notes TEXT")
+
+    for stmt in alters:
+        db.session.execute(text(stmt))
+
+    if alters:
+        db.session.commit()
+
+
+def ensure_order_messages_table() -> None:
+    """
+    Module 5 migration: lightweight message thread per order.
+    """
+    db.session.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS order_messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              order_id INTEGER NOT NULL,
+              sender_id INTEGER NOT NULL,
+              sender_role TEXT NOT NULL,
+              message TEXT NOT NULL,
+              created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+              FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+              FOREIGN KEY(sender_id) REFERENCES users(id)
+            )
+            """
+        )
+    )
+    db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_order_messages_order_id ON order_messages(order_id)"))
+    db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_order_messages_sender_id ON order_messages(sender_id)"))
+    db.session.commit()

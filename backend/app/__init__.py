@@ -70,9 +70,16 @@ def create_app() -> Flask:
 
     with app.app_context():
         db.create_all()
-        from app.services.bootstrap import ensure_admin_user, ensure_geo_columns
+        from app.services.bootstrap import (
+            ensure_admin_user,
+            ensure_geo_columns,
+            ensure_order_messages_table,
+            ensure_order_v2_columns,
+        )
 
         ensure_geo_columns()
+        ensure_order_v2_columns()
+        ensure_order_messages_table()
         ensure_admin_user()
 
     @app.get("/api/health")
