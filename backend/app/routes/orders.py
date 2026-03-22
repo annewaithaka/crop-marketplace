@@ -21,6 +21,22 @@ def _parse_positive_float(value, field_name: str) -> float:
     return f
 
 
+def _pickup_location_for_buyer(order: Order) -> dict | None:
+    status = (order.status or "").lower()
+    if status not in {"accepted", "completed"}:
+        return None
+    c = order.crop
+    if c is None or c.lat is None or c.lng is None:
+        return None
+    return {
+        "lat": float(c.lat),
+        "lng": float(c.lng),
+        "county": c.county,
+        "town": c.town,
+        "location_label": c.location,
+    }
+
+
 @bp.post("")
 @require_roles("buyer")
 def create_order():
@@ -100,6 +116,7 @@ def my_orders():
                 "contact_details": o.contact_details,
                 "status": o.status,
                 "created_at": o.created_at.isoformat(),
+                "pickup_location": _pickup_location_for_buyer(o),
             }
             for o in orders
         ]
@@ -127,6 +144,11 @@ def incoming_orders():
                     "unit": o.crop.unit,
                     "pack_size_kg": o.crop.pack_size_kg,
                     "min_order_qty": o.crop.min_order_qty,
+                    "county": o.crop.county,
+                    "town": o.crop.town,
+                    "lat": o.crop.lat,
+                    "lng": o.crop.lng,
+                    "pickup_locked": bool(o.crop.pickup_locked),
                 },
                 "buyer_id": o.buyer_id,
                 "quantity_requested": o.quantity_requested,
@@ -191,7 +213,7 @@ def update_status(order_id: int):
 
     qty = float(order.quantity_requested)
 
-    # Reserve stock on accept
+    # Reserve stock on accept + lock pickup edits forever (even if later rejected).
     if current == "pending" and target == "accepted":
         if qty > crop.quantity:
             return {
@@ -201,6 +223,7 @@ def update_status(order_id: int):
                 },
             }, 400
         crop.quantity = float(crop.quantity) - qty
+        crop.pickup_locked = True
 
     # Release reserved stock if rejecting an accepted order
     if current == "accepted" and target == "rejected":

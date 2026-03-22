@@ -1,5 +1,5 @@
 // frontend/src/pages/FarmerAddListing.jsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.js";
 import { useToast } from "../context/ToastContext.jsx";
 import ImagePicker from "../components/ImagePicker.jsx";
@@ -10,6 +10,8 @@ const UNITS = [
   { value: "crate", label: "Crates (crate)" },
   { value: "piece", label: "Pieces (piece)" },
 ];
+
+const KENYA_CENTER = { lat: -0.0236, lng: 37.9062 }; // roughly Kenya center
 
 function toNumber(value) {
   if (value === "" || value === null || value === undefined) return NaN;
@@ -26,8 +28,18 @@ function clampToThree(files) {
   return (files || []).slice(0, 3);
 }
 
+function fmtCoord(n) {
+  if (n === "" || n === null || n === undefined) return "";
+  const v = Number(n);
+  if (Number.isNaN(v)) return "";
+  return v.toFixed(6);
+}
+
 export default function FarmerAddListing() {
   const toast = useToast();
+  const mapElRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -35,6 +47,10 @@ export default function FarmerAddListing() {
     unit: "kg",
     price_per_unit: "",
     location: "",
+    county: "",
+    town: "",
+    lat: "",
+    lng: "",
     pack_size_kg: "",
     min_order_qty: "",
   });
@@ -43,16 +59,72 @@ export default function FarmerAddListing() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [pageError, setPageError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const canSubmit = useMemo(() => {
+    const hasPin = form.lat !== "" && form.lng !== "";
     return (
       form.name.trim() &&
       form.location.trim() &&
       form.quantity !== "" &&
       form.price_per_unit !== "" &&
+      hasPin &&
       !submitting
     );
   }, [form, submitting]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initMap() {
+      if (!mapElRef.current || mapRef.current) return;
+
+      const L = (await import("leaflet")).default;
+
+      const map = L.map(mapElRef.current, {
+        zoomControl: true,
+        attributionControl: true,
+      }).setView([KENYA_CENTER.lat, KENYA_CENTER.lng], 6);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+      }).addTo(map);
+
+      const marker = L.marker([KENYA_CENTER.lat, KENYA_CENTER.lng], { draggable: true }).addTo(map);
+
+      function syncFromMarker() {
+        const ll = marker.getLatLng();
+        setForm((p) => ({ ...p, lat: String(ll.lat), lng: String(ll.lng) }));
+      }
+
+      marker.on("dragend", syncFromMarker);
+
+      map.on("click", (e) => {
+        marker.setLatLng(e.latlng);
+        syncFromMarker();
+      });
+
+      mapRef.current = map;
+      markerRef.current = marker;
+
+      if (!cancelled) setMapReady(true);
+    }
+
+    initMap();
+
+    return () => {
+      cancelled = true;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+          markerRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   function validate() {
     const next = {};
@@ -67,6 +139,14 @@ export default function FarmerAddListing() {
     const ppu = toNumber(form.price_per_unit);
     if (Number.isNaN(ppu)) next.price_per_unit = "Price is required.";
     else if (ppu <= 0) next.price_per_unit = "Price must be greater than 0.";
+
+    const lat = toNumber(form.lat);
+    const lng = toNumber(form.lng);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) next.location_pin = "Pinned location is required (tap the map).";
+    else {
+      if (lat < -90 || lat > 90) next.lat = "Latitude must be between -90 and 90.";
+      if (lng < -180 || lng > 180) next.lng = "Longitude must be between -180 and 180.";
+    }
 
     const pack = toOptionalNumber(form.pack_size_kg);
     if (pack !== null) {
@@ -87,6 +167,38 @@ export default function FarmerAddListing() {
     return Object.keys(next).length === 0;
   }
 
+  async function useMyLocation() {
+    setFieldErrors((p) => ({ ...p, location_pin: undefined, lat: undefined, lng: undefined }));
+    if (!navigator.geolocation) {
+      toast.show({ type: "error", title: "Geolocation unavailable", message: "Your browser does not support location." });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        setForm((p) => ({ ...p, lat: String(lat), lng: String(lng) }));
+
+        const map = mapRef.current;
+        const marker = markerRef.current;
+        if (map && marker) {
+          marker.setLatLng([lat, lng]);
+          map.setView([lat, lng], 14);
+        }
+      },
+      () => {
+        toast.show({
+          type: "error",
+          title: "Could not get location",
+          message: "Enable location permission and try again.",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
   async function create(e) {
     e.preventDefault();
     setFieldErrors({});
@@ -102,6 +214,10 @@ export default function FarmerAddListing() {
       const res = await api.createCrop({
         name: form.name.trim(),
         location: form.location.trim(),
+        county: form.county.trim() ? form.county.trim() : null,
+        town: form.town.trim() ? form.town.trim() : null,
+        lat: Number(form.lat),
+        lng: Number(form.lng),
         unit: form.unit,
         quantity: Number(form.quantity),
         price_per_unit: Number(form.price_per_unit),
@@ -126,10 +242,21 @@ export default function FarmerAddListing() {
         unit: "kg",
         price_per_unit: "",
         location: "",
+        county: "",
+        town: "",
+        lat: "",
+        lng: "",
         pack_size_kg: "",
         min_order_qty: "",
       });
       setImages([]);
+
+      const map = mapRef.current;
+      const marker = markerRef.current;
+      if (map && marker) {
+        marker.setLatLng([KENYA_CENTER.lat, KENYA_CENTER.lng]);
+        map.setView([KENYA_CENTER.lat, KENYA_CENTER.lng], 6);
+      }
     } catch (e2) {
       const msg = e2?.message || "Failed to add listing.";
       setPageError(msg);
@@ -238,15 +365,75 @@ export default function FarmerAddListing() {
         </div>
 
         <div className="grid">
-          <label>Location</label>
+          <label>Location label (what buyers see before acceptance)</label>
           <input
             className="input"
-            placeholder="e.g. Eldoret"
+            placeholder="e.g. Eldoret / Kapsabet Road"
             value={form.location}
             onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
             aria-invalid={Boolean(fieldErrors.location)}
           />
           {fieldErrors.location && <div className="error">{fieldErrors.location}</div>}
+        </div>
+
+        <div className="row">
+          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+            <label>County (optional)</label>
+            <input
+              className="input"
+              placeholder="e.g. Uasin Gishu"
+              value={form.county}
+              onChange={(e) => setForm((p) => ({ ...p, county: e.target.value }))}
+            />
+          </div>
+          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+            <label>Town (optional)</label>
+            <input
+              className="input"
+              placeholder="e.g. Eldoret"
+              value={form.town}
+              onChange={(e) => setForm((p) => ({ ...p, town: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 12 }}>
+          <div className="kv">
+            <strong>Pin pickup location (required)</strong>
+            <button className="btn" type="button" onClick={useMyLocation} disabled={submitting || !mapReady}>
+              Use my location
+            </button>
+          </div>
+
+          <div
+            ref={mapElRef}
+            style={{
+              height: 320,
+              width: "100%",
+              borderRadius: 12,
+              overflow: "hidden",
+              marginTop: 10,
+              border: "1px solid rgba(0,0,0,0.08)",
+            }}
+          />
+
+          <div className="row" style={{ marginTop: 10 }}>
+            <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+              <label>Latitude</label>
+              <input className="input" value={fmtCoord(form.lat)} readOnly aria-invalid={Boolean(fieldErrors.lat)} />
+              {fieldErrors.lat && <div className="error">{fieldErrors.lat}</div>}
+            </div>
+            <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+              <label>Longitude</label>
+              <input className="input" value={fmtCoord(form.lng)} readOnly aria-invalid={Boolean(fieldErrors.lng)} />
+              {fieldErrors.lng && <div className="error">{fieldErrors.lng}</div>}
+            </div>
+          </div>
+
+          {fieldErrors.location_pin && <div className="error">{fieldErrors.location_pin}</div>}
+          <div className="small" style={{ marginTop: 8 }}>
+            Buyers will only see the pinned location after you accept their order.
+          </div>
         </div>
 
         <ImagePicker disabled={submitting} value={images} onChange={setImages} />

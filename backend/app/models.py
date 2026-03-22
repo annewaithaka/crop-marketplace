@@ -1,4 +1,4 @@
-#backend/app/models.py
+# backend/app/models.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -28,9 +28,22 @@ class Crop(db.Model):
 
     name = db.Column(db.String(120), nullable=False, index=True)
     quantity = db.Column(db.Float, nullable=False)
-    unit = db.Column(db.String(10), nullable=False, default="kg")  # kg|bag|crate
+    unit = db.Column(db.String(10), nullable=False, default="kg")  # kg|bag|crate|piece
     price_per_unit = db.Column(db.Float, nullable=False, index=True)
+
+    # Human-friendly string (still useful)
     location = db.Column(db.String(160), nullable=False, index=True)
+
+    # Optional (Kenya-friendly without needing a towns dataset)
+    county = db.Column(db.String(80), nullable=True, index=True)
+    town = db.Column(db.String(120), nullable=True, index=True)
+
+    # Required: pinned pickup location
+    lat = db.Column(db.Float, nullable=True)
+    lng = db.Column(db.Float, nullable=True)
+
+    # Once an order is accepted, pinned location becomes immutable
+    pickup_locked = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
     pack_size_kg = db.Column(db.Float, nullable=True)
     min_order_qty = db.Column(db.Float, nullable=True)

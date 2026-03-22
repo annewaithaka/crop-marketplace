@@ -124,6 +124,7 @@ export const api = {
   me: () => request("/auth/me"),
 
   listCrops: (params = {}) => {
+    // Supports: name, location, county, town, min_price, max_price (and later: lat,lng,radius_km)
     const qs = new URLSearchParams(cleanParams(params)).toString();
     return request(`/crops${qs ? `?${qs}` : ""}`, { auth: false });
   },
@@ -142,8 +143,7 @@ export const api = {
     return requestMultipart(`/crops/${cropId}/images`, { method: "POST", formData: fd });
   },
 
-  deleteCropImage: (cropId, imageId) =>
-    request(`/crops/${cropId}/images/${imageId}`, { method: "DELETE" }),
+  deleteCropImage: (cropId, imageId) => request(`/crops/${cropId}/images/${imageId}`, { method: "DELETE" }),
 
   // Orders
   createOrder: (payload) => request("/orders", { method: "POST", body: payload }),

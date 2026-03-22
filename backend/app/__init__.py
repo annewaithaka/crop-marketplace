@@ -1,9 +1,4 @@
-"""
-Flask application factory.
-- Uses SQLite + SQLAlchemy
-- JWT auth
-- Roles: farmer, buyer, admin
-"""
+# backend/app/__init__.py
 from __future__ import annotations
 
 import os
@@ -75,8 +70,9 @@ def create_app() -> Flask:
 
     with app.app_context():
         db.create_all()
-        from app.services.bootstrap import ensure_admin_user
+        from app.services.bootstrap import ensure_admin_user, ensure_geo_columns
 
+        ensure_geo_columns()
         ensure_admin_user()
 
     @app.get("/api/health")

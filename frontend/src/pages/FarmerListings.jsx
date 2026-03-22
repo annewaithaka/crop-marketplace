@@ -1,5 +1,5 @@
 // frontend/src/pages/FarmerListings.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { useToast } from "../context/ToastContext.jsx";
 import EmptyState from "../components/EmptyState.jsx";
@@ -29,19 +29,35 @@ function clipToRemaining(existingCount, files) {
   return (files || []).slice(0, remaining);
 }
 
+function fmtCoord(n) {
+  if (n === null || n === undefined || n === "") return "";
+  const v = Number(n);
+  if (Number.isNaN(v)) return "";
+  return v.toFixed(6);
+}
+
 function EditForm({ crop, onCancel, onSave }) {
+  const pickupLocked = Boolean(crop.pickup_locked);
+
   const [form, setForm] = useState({
     name: crop.name || "",
     quantity: String(crop.quantity ?? ""),
     unit: crop.unit || "kg",
     price_per_unit: String(crop.price_per_unit ?? ""),
     location: crop.location || "",
+
+    // optional geo labels (not required, but saved)
+    county: crop.county ?? "",
+    town: crop.town ?? "",
+
     pack_size_kg: crop.pack_size_kg ?? "",
     min_order_qty: crop.min_order_qty ?? "",
   });
 
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+
+  const canEditPickupFields = useMemo(() => !pickupLocked, [pickupLocked]);
 
   function validate() {
     const next = {};
@@ -86,12 +102,20 @@ function EditForm({ crop, onCancel, onSave }) {
 
       await onSave({
         name: form.name.trim(),
-        location: form.location.trim(),
         unit: form.unit,
         quantity: Number(form.quantity),
         price_per_unit: Number(form.price_per_unit),
         pack_size_kg: pack === null ? null : pack,
         min_order_qty: minOrder === null ? null : minOrder,
+
+        // always send current values; backend will reject changes if locked
+        location: form.location.trim(),
+        county: form.county.trim() ? form.county.trim() : null,
+        town: form.town.trim() ? form.town.trim() : null,
+
+        // keep pinned coords unchanged here (pin editing UI is separate)
+        lat: crop.lat,
+        lng: crop.lng,
       });
     } finally {
       setSaving(false);
@@ -100,6 +124,15 @@ function EditForm({ crop, onCancel, onSave }) {
 
   return (
     <form onSubmit={submit} className="grid" style={{ marginTop: 10 }} noValidate>
+      {pickupLocked && (
+        <div className="card" style={{ padding: 10 }}>
+          <div className="small" style={{ marginTop: 0 }}>
+            <b>Pickup location locked:</b> an order for this listing has been accepted, so the pickup pin + location labels
+            can’t be changed.
+          </div>
+        </div>
+      )}
+
       <div className="row">
         <div className="grid" style={{ flex: 1, minWidth: 220 }}>
           <label>Crop name</label>
@@ -112,13 +145,39 @@ function EditForm({ crop, onCancel, onSave }) {
         </div>
 
         <div className="grid" style={{ flex: 1, minWidth: 220 }}>
-          <label>Location</label>
+          <label>Location label (shown before acceptance)</label>
           <input
             className="input"
             value={form.location}
             onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+            disabled={!canEditPickupFields}
+            title={pickupLocked ? "Locked after an order is accepted" : ""}
           />
           {errors.location && <div className="error">{errors.location}</div>}
+        </div>
+      </div>
+
+      <div className="row">
+        <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+          <label>County (optional)</label>
+          <input
+            className="input"
+            value={form.county ?? ""}
+            onChange={(e) => setForm((p) => ({ ...p, county: e.target.value }))}
+            disabled={!canEditPickupFields}
+            title={pickupLocked ? "Locked after an order is accepted" : ""}
+          />
+        </div>
+
+        <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+          <label>Town (optional)</label>
+          <input
+            className="input"
+            value={form.town ?? ""}
+            onChange={(e) => setForm((p) => ({ ...p, town: e.target.value }))}
+            disabled={!canEditPickupFields}
+            title={pickupLocked ? "Locked after an order is accepted" : ""}
+          />
         </div>
       </div>
 
@@ -190,6 +249,25 @@ function EditForm({ crop, onCancel, onSave }) {
             onChange={(e) => setForm((p) => ({ ...p, min_order_qty: e.target.value }))}
           />
           {errors.min_order_qty && <div className="error">{errors.min_order_qty}</div>}
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 10 }}>
+        <div className="small" style={{ marginTop: 0 }}>
+          <b>Pinned pickup coordinates</b> (buyers see after you accept):
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+            <label>Latitude</label>
+            <input className="input" value={fmtCoord(crop.lat)} readOnly />
+          </div>
+          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+            <label>Longitude</label>
+            <input className="input" value={fmtCoord(crop.lng)} readOnly />
+          </div>
+        </div>
+        <div className="small" style={{ marginTop: 8 }}>
+          To change the pin (only if not locked), use the Edit Pin feature (we’ll add next).
         </div>
       </div>
 
@@ -325,10 +403,10 @@ export default function FarmerListings() {
           {items.map((c) => {
             const isExpanded = expandedId === c.id;
             const isEditing = editingId === c.id;
+            const pickupLocked = Boolean(c.pickup_locked);
 
             return (
               <div key={c.id} className="card listing-card">
-                {/* Thumbnails-only (no big image) */}
                 {c.images?.length > 0 && (
                   <div className="thumb-row" aria-label="Listing thumbnails">
                     {c.images.map((img, idx) => (
@@ -380,7 +458,10 @@ export default function FarmerListings() {
                   </div>
                 )}
 
-                <div className="small">Location: {c.location}</div>
+                <div className="small">
+                  Location label: {c.location}{" "}
+                  {pickupLocked && <span className="pill" style={{ marginLeft: 8 }}>pickup locked</span>}
+                </div>
 
                 <div className="row" style={{ marginTop: 10 }}>
                   <button className="btn" type="button" onClick={() => setExpandedId(isExpanded ? null : c.id)}>
@@ -452,12 +533,7 @@ export default function FarmerListings() {
         </div>
       )}
 
-      <Lightbox
-        open={lightboxOpen}
-        title={lightboxTitle}
-        src={lightboxSrc}
-        onClose={() => setLightboxOpen(false)}
-      />
+      <Lightbox open={lightboxOpen} title={lightboxTitle} src={lightboxSrc} onClose={() => setLightboxOpen(false)} />
     </>
   );
 }
