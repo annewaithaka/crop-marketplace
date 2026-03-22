@@ -1,6 +1,7 @@
 # backend/app/routes/crops.py
 from __future__ import annotations
 
+import math
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +12,7 @@ from sqlalchemy import and_
 from werkzeug.utils import secure_filename
 
 from app import db
-from app.models import Crop, CropImage, User, Order
+from app.models import Crop, CropImage, User
 from app.utils.authz import require_roles
 
 bp = Blueprint("crops", __name__)
@@ -37,22 +38,13 @@ def _parse_optional_positive_float(value, field_name: str) -> float | None:
     return _parse_positive_float(value, field_name)
 
 
-def _parse_required_float(value, field_name: str) -> float:
+def _parse_optional_float(value, field_name: str) -> float | None:
     if value in (None, ""):
-        raise ValueError(f"{field_name} is required")
+        return None
     try:
         return float(value)
     except (TypeError, ValueError):
         raise ValueError(f"{field_name} must be a number")
-
-
-def _validate_lat_lng(lat: float, lng: float) -> dict:
-    errs = {}
-    if lat < -90 or lat > 90:
-        errs["lat"] = "lat must be between -90 and 90"
-    if lng < -180 or lng > 180:
-        errs["lng"] = "lng must be between -180 and 180"
-    return errs
 
 
 def _public_upload_url(filename: str) -> str:
@@ -114,9 +106,24 @@ def _validate_and_store_images(crop: Crop, files):
     return saved, {}
 
 
-def _crop_public_dict(c: Crop):
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """
+    Returns great-circle distance between (lat1,lng1) and (lat2,lng2) in kilometers.
+    """
+    r = 6371.0088  # mean Earth radius in km
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+
+def _crop_public_dict(c: Crop, distance_km: float | None = None):
     farmer = User.query.get(c.farmer_id)
-    return {
+    d = {
         "id": c.id,
         "name": c.name,
         "quantity": c.quantity,
@@ -139,6 +146,9 @@ def _crop_public_dict(c: Crop):
         if farmer
         else None,
     }
+    if distance_km is not None:
+        d["distance_km"] = distance_km
+    return d
 
 
 def _crop_farmer_dict(c: Crop):
@@ -164,6 +174,11 @@ def _crop_farmer_dict(c: Crop):
 @bp.get("")
 @jwt_required(optional=True)
 def list_crops():
+    """
+    Public browse endpoint.
+    IMPORTANT: does NOT expose farmer lat/lng.
+    Distance filter is allowed and returns distance_km only.
+    """
     name = (request.args.get("name") or "").strip()
     location = (request.args.get("location") or "").strip()
     county = (request.args.get("county") or "").strip()
@@ -171,8 +186,14 @@ def list_crops():
     min_price = request.args.get("min_price")
     max_price = request.args.get("max_price")
 
+    # Distance filter (buyer location)
+    lat_q = request.args.get("lat")
+    lng_q = request.args.get("lng")
+    radius_q = request.args.get("radius_km")
+
     q = Crop.query
     conds = []
+    errors: dict[str, str] = {}
 
     if name:
         conds.append(Crop.name.ilike(f"%{name}%"))
@@ -183,7 +204,6 @@ def list_crops():
     if town:
         conds.append(Crop.town.ilike(f"%{town}%"))
 
-    errors = {}
     if min_price not in (None, ""):
         try:
             conds.append(Crop.price_per_unit >= float(min_price))
@@ -196,14 +216,63 @@ def list_crops():
         except (TypeError, ValueError):
             errors["max_price"] = "max_price must be a number"
 
+    # Validate distance params (must be all-or-none)
+    distance_mode = any(v not in (None, "") for v in (lat_q, lng_q, radius_q))
+    buyer_lat = buyer_lng = radius_km = None
+    if distance_mode:
+        if lat_q in (None, "") or lng_q in (None, "") or radius_q in (None, ""):
+            errors["radius_km"] = "lat, lng, and radius_km must be provided together"
+        else:
+            try:
+                buyer_lat = float(lat_q)
+            except (TypeError, ValueError):
+                errors["lat"] = "lat must be a number"
+            try:
+                buyer_lng = float(lng_q)
+            except (TypeError, ValueError):
+                errors["lng"] = "lng must be a number"
+            try:
+                radius_km = float(radius_q)
+            except (TypeError, ValueError):
+                errors["radius_km"] = "radius_km must be a number"
+
+            if buyer_lat is not None and (buyer_lat < -90 or buyer_lat > 90):
+                errors["lat"] = "lat must be between -90 and 90"
+            if buyer_lng is not None and (buyer_lng < -180 or buyer_lng > 180):
+                errors["lng"] = "lng must be between -180 and 180"
+            if radius_km is not None and radius_km <= 0:
+                errors["radius_km"] = "radius_km must be greater than 0"
+
     if errors:
         return {"error": "validation failed", "errors": errors}, 400
 
     if conds:
         q = q.filter(and_(*conds))
 
-    crops = q.order_by(Crop.created_at.desc()).limit(200).all()
-    return {"items": [_crop_public_dict(c) for c in crops]}
+    crops = q.order_by(Crop.created_at.desc()).limit(400).all()
+
+    # Apply distance filtering in Python (SQLite-friendly)
+    if distance_mode and buyer_lat is not None and buyer_lng is not None and radius_km is not None:
+        filtered = []
+        for c in crops:
+            if c.lat is None or c.lng is None:
+                continue
+            dkm = _haversine_km(buyer_lat, buyer_lng, float(c.lat), float(c.lng))
+            if dkm <= radius_km:
+                filtered.append((c, dkm))
+
+        # Closest first
+        filtered.sort(key=lambda t: t[1])
+
+        # Return top 200 after filtering
+        return {
+            "items": [
+                _crop_public_dict(c, distance_km=round(dkm, 1))
+                for (c, dkm) in filtered[:200]
+            ]
+        }
+
+    return {"items": [_crop_public_dict(c) for c in crops[:200]]}
 
 
 @bp.post("")
@@ -263,12 +332,16 @@ def create_crop():
         return {"error": "validation failed", "errors": {"price_per_unit": str(e)}}, 400
 
     try:
-        lat = _parse_required_float(lat_raw, "lat")
-        lng = _parse_required_float(lng_raw, "lng")
-    except ValueError as e:
-        return {"error": "validation failed", "errors": {"location_pin": str(e)}}, 400
+        lat = float(lat_raw)
+        lng = float(lng_raw)
+    except (TypeError, ValueError):
+        return {"error": "validation failed", "errors": {"location_pin": "lat and lng must be numbers"}}, 400
 
-    ll_errs = _validate_lat_lng(lat, lng)
+    ll_errs = {}
+    if lat < -90 or lat > 90:
+        ll_errs["lat"] = "lat must be between -90 and 90"
+    if lng < -180 or lng > 180:
+        ll_errs["lng"] = "lng must be between -180 and 180"
     if ll_errs:
         return {"error": "validation failed", "errors": ll_errs}, 400
 
@@ -369,12 +442,16 @@ def update_crop(crop_id: int):
         return {"error": "validation failed", "errors": {"price_per_unit": str(e)}}, 400
 
     try:
-        lat = _parse_required_float(lat_raw, "lat")
-        lng = _parse_required_float(lng_raw, "lng")
-    except ValueError as e:
-        return {"error": "validation failed", "errors": {"location_pin": str(e)}}, 400
+        lat = float(lat_raw)
+        lng = float(lng_raw)
+    except (TypeError, ValueError):
+        return {"error": "validation failed", "errors": {"location_pin": "lat and lng must be numbers"}}, 400
 
-    ll_errs = _validate_lat_lng(lat, lng)
+    ll_errs = {}
+    if lat < -90 or lat > 90:
+        ll_errs["lat"] = "lat must be between -90 and 90"
+    if lng < -180 or lng > 180:
+        ll_errs["lng"] = "lng must be between -180 and 180"
     if ll_errs:
         return {"error": "validation failed", "errors": ll_errs}, 400
 
@@ -394,8 +471,7 @@ def update_crop(crop_id: int):
             "errors": {"min_order_qty": "min_order_qty cannot exceed available quantity."},
         }, 400
 
-    # Lock pinned pickup edits once an order has ever been accepted.
-    # Uses persisted flag (set in orders.py) so accept->reject stays locked.
+    # Lock pickup edits forever after any accepted order (flag set in orders.py on accept).
     if crop.pickup_locked:
         attempted_change = any(
             [

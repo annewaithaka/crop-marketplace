@@ -66,6 +66,12 @@ function ListingGalleryThumbs({ crop }) {
   );
 }
 
+const RADIUS_OPTIONS = [
+  { value: "10", label: "Within 10 km" },
+  { value: "25", label: "Within 25 km" },
+  { value: "50", label: "Within 50 km" },
+];
+
 export default function BuyerBrowse() {
   const toast = useToast();
 
@@ -74,7 +80,21 @@ export default function BuyerBrowse() {
     location: "",
     min_price: "",
     max_price: "",
+    county: "",
+    town: "",
   });
+
+  // buyer-side distance filter inputs
+  const [geo, setGeo] = useState({
+    lat: "",
+    lng: "",
+    radius_km: "25",
+  });
+
+  const distanceEnabled = useMemo(
+    () => geo.lat !== "" && geo.lng !== "" && geo.radius_km !== "",
+    [geo.lat, geo.lng, geo.radius_km]
+  );
 
   const [items, setItems] = useState([]);
   const [pageError, setPageError] = useState("");
@@ -92,11 +112,17 @@ export default function BuyerBrowse() {
     [items, orderCropId]
   );
 
-  async function load(nextFilters = filters) {
+  async function load(nextFilters = filters, nextGeo = geo) {
     setPageError("");
     setLoadingList(true);
     try {
-      const res = await api.listCrops(nextFilters);
+      const params = {
+        ...nextFilters,
+        ...(nextGeo.lat && nextGeo.lng
+          ? { lat: nextGeo.lat, lng: nextGeo.lng, radius_km: nextGeo.radius_km }
+          : {}),
+      };
+      const res = await api.listCrops(params);
       setItems(res.items || []);
     } catch (e) {
       const msg = e?.message || "Failed to load crops.";
@@ -168,15 +194,43 @@ export default function BuyerBrowse() {
   }
 
   async function onSearchClick() {
-    await load(filters);
+    await load(filters, geo);
+  }
+
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      toast.show({ type: "error", title: "Geolocation unavailable", message: "Your browser does not support location." });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setGeo((p) => ({ ...p, lat: String(lat), lng: String(lng) }));
+        toast.show({ type: "success", title: "Location set", message: "Distance filtering is ready." });
+      },
+      () => {
+        toast.show({
+          type: "error",
+          title: "Could not get location",
+          message: "Enable location permission and try again.",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
+  function clearDistance() {
+    setGeo((p) => ({ ...p, lat: "", lng: "" }));
   }
 
   return (
     <div className="container">
-      <PageHeader title="Browse Crops" subtitle="Search by crop name, location, or price." />
+      <PageHeader title="Browse Crops" subtitle="Search by crop name, location, or price. Optional: filter by distance." />
 
       <div className="card">
-        <div className="row" style={{ marginTop: 10 }}>
+        <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 10 }}>
           <input
             className="input"
             style={{ flex: 1, minWidth: 180 }}
@@ -190,6 +244,20 @@ export default function BuyerBrowse() {
             placeholder="Location (e.g. Eldoret)"
             value={filters.location}
             onChange={(e) => setFilters((p) => ({ ...p, location: e.target.value }))}
+          />
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 160 }}
+            placeholder="County (optional)"
+            value={filters.county}
+            onChange={(e) => setFilters((p) => ({ ...p, county: e.target.value }))}
+          />
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 160 }}
+            placeholder="Town (optional)"
+            value={filters.town}
+            onChange={(e) => setFilters((p) => ({ ...p, town: e.target.value }))}
           />
           <input
             className="input"
@@ -207,9 +275,40 @@ export default function BuyerBrowse() {
             value={filters.max_price}
             onChange={(e) => setFilters((p) => ({ ...p, max_price: e.target.value }))}
           />
+
           <button className="btn" onClick={onSearchClick} disabled={loadingList}>
             {loadingList ? "Searching…" : "Search"}
           </button>
+        </div>
+
+        <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 10 }}>
+          <button className="btn" type="button" onClick={useMyLocation} disabled={loadingList}>
+            Use my location
+          </button>
+
+          <select
+            className="select"
+            value={geo.radius_km}
+            onChange={(e) => setGeo((p) => ({ ...p, radius_km: e.target.value }))}
+            disabled={!distanceEnabled}
+            title={!distanceEnabled ? "Set your location first" : ""}
+          >
+            {RADIUS_OPTIONS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+
+          <button className="btn" type="button" onClick={clearDistance} disabled={!distanceEnabled || loadingList}>
+            Clear distance
+          </button>
+
+          {distanceEnabled && (
+            <span className="pill" title="Your location is used only to calculate approximate distance">
+              Distance: {geo.radius_km} km
+            </span>
+          )}
         </div>
 
         {pageError && (
@@ -262,8 +361,24 @@ export default function BuyerBrowse() {
 
                 <div className="small">Location: {c.location}</div>
 
+                {(c.town || c.county) && (
+                  <div className="small">
+                    Area: {[c.town, c.county].filter(Boolean).join(", ")}
+                  </div>
+                )}
+
+                {typeof c.distance_km === "number" && (
+                  <div className="small">
+                    Distance: <b>~{c.distance_km} km</b>
+                  </div>
+                )}
+
                 <div className="small" style={{ marginTop: 6 }}>
                   Farmer: {c.farmer?.name} • {c.farmer?.phone || "no phone"} • {c.farmer?.email}
+                </div>
+
+                <div className="small" style={{ marginTop: 6 }}>
+                  Pickup pin: {c.has_location ? "available after acceptance" : "not available"}
                 </div>
 
                 <div className="row" style={{ marginTop: 10 }}>
