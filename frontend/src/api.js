@@ -1,5 +1,5 @@
 // frontend/src/api.js
-const API_BASE = "http://172.27.45.68:5000/api";
+const API_BASE = "http://127.0.0.1:5000/api";
 
 export function getToken() {
   return localStorage.getItem("token") || "";
@@ -118,6 +118,11 @@ async function requestMultipart(path, { method = "POST", formData, auth = true }
   return data;
 }
 
+function rangeQS(range = {}) {
+  const qs = new URLSearchParams(cleanParams(range)).toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const api = {
   register: (payload) => request("/auth/register", { method: "POST", body: payload, auth: false }),
   login: (payload) => request("/auth/login", { method: "POST", body: payload, auth: false }),
@@ -130,7 +135,6 @@ export const api = {
 
   myCrops: () => request("/crops/mine"),
   createCrop: (payload) => request("/crops", { method: "POST", body: payload }),
-
   updateCrop: (cropId, payload) => request(`/crops/${cropId}`, { method: "PUT", body: payload }),
   deleteCrop: (cropId) => request(`/crops/${cropId}`, { method: "DELETE" }),
 
@@ -139,7 +143,6 @@ export const api = {
     for (const f of files) fd.append("images", f);
     return requestMultipart(`/crops/${cropId}/images`, { method: "POST", formData: fd });
   },
-
   deleteCropImage: (cropId, imageId) => request(`/crops/${cropId}/images/${imageId}`, { method: "DELETE" }),
 
   // Orders
@@ -148,14 +151,28 @@ export const api = {
   incomingOrders: () => request("/orders/incoming"),
   updateOrderStatus: (id, status) => request(`/orders/${id}/status`, { method: "PUT", body: { status } }),
 
-  // Order messages (Module 5)
+  // Order messages
   orderMessages: (orderId) => request(`/orders/${orderId}/messages`),
-  sendOrderMessage: (orderId, message) => request(`/orders/${orderId}/messages`, { method: "POST", body: { message } }),
+  sendOrderMessage: (orderId, message) =>
+    request(`/orders/${orderId}/messages`, { method: "POST", body: { message } }),
 
-  // Admin
+  // Admin — management
   adminUsers: () => request("/admin/users"),
-  adminSetUserActive: (id, is_active) => request(`/admin/users/${id}/active`, { method: "PUT", body: { is_active } }),
+  adminSetUserActive: (id, is_active) =>
+    request(`/admin/users/${id}/active`, { method: "PUT", body: { is_active } }),
   adminCrops: () => request("/admin/crops"),
   adminOrders: () => request("/admin/orders"),
   adminSummary: () => request("/admin/reports/summary"),
+
+  // Admin — reports (all accept { from, to } as ISO YYYY-MM-DD)
+  adminReportKpis:           (range) => request(`/admin/reports/kpis${rangeQS(range)}`),
+  adminReportOrdersOverTime: (range) => request(`/admin/reports/orders-over-time${rangeQS(range)}`),
+  adminReportTopCrops:       (range, limit = 10) =>
+    request(`/admin/reports/top-crops${rangeQS({ ...range, limit })}`),
+  adminReportTopFarmers:     (range, limit = 10) =>
+    request(`/admin/reports/top-farmers${rangeQS({ ...range, limit })}`),
+  adminReportTopBuyers:      (range, limit = 10) =>
+    request(`/admin/reports/top-buyers${rangeQS({ ...range, limit })}`),
+  adminReportOrdersByCounty: (range) => request(`/admin/reports/orders-by-county${rangeQS(range)}`),
+  adminReportFunnel:         (range) => request(`/admin/reports/funnel${rangeQS(range)}`),
 };

@@ -1,20 +1,23 @@
 // frontend/src/pages/FarmerOrders.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
-import PageHeader from "../components/PageHeader.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import StatusPill from "../components/StatusPill.jsx";
+import PageHeader from "../components/PageHeader.jsx";
 import { useToast } from "../context/ToastContext.jsx";
+import { formatKsh, formatNumber } from "../utils/format.js";
 
 function allowedActions(status) {
   const s = (status || "").toLowerCase();
-  if (s === "pending") return { accept: true, reject: true, complete: false };
-  if (s === "accepted") return { accept: false, reject: true, complete: true };
+  if (s === "pending")  return { accept: true,  reject: true,  complete: false };
+  if (s === "accepted") return { accept: false, reject: true,  complete: true  };
   return { accept: false, reject: false, complete: false };
 }
 
+/* --- Message thread (quieter visual style) --- */
+
 function MessageThread({ orderId }) {
   const toast = useToast();
-
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
@@ -37,12 +40,10 @@ function MessageThread({ orderId }) {
     e.preventDefault();
     const msg = draft.trim();
     if (!msg) return;
-
     setSending(true);
     try {
       const res = await api.sendOrderMessage(orderId, msg);
-      const item = res.item;
-      setItems((prev) => [...prev, ...(item ? [item] : [])]);
+      if (res.item) setItems((prev) => [...prev, res.item]);
       setDraft("");
     } catch (e2) {
       toast.show({ type: "error", title: "Send failed", message: e2?.message || "Could not send message." });
@@ -57,50 +58,57 @@ function MessageThread({ orderId }) {
   }, [open]);
 
   return (
-    <div className="card" style={{ marginTop: 10 }}>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <strong>Messages</strong>
-        <button className="btn" type="button" onClick={() => setOpen((p) => !p)}>
+    <div className="thread">
+      <div className="thread-head">
+        <span className="thread-title">Messages with buyer</span>
+        <button className="btn sm ghost" type="button" onClick={() => setOpen((p) => !p)}>
           {open ? "Hide" : "Open"}
         </button>
       </div>
 
       {open && (
-        <div className="grid" style={{ marginTop: 10 }}>
+        <>
           {loading ? (
-            <div className="small">Loading messages…</div>
+            <div className="small" style={{ marginTop: 10 }}>Loading messages…</div>
           ) : items.length === 0 ? (
-            <div className="small">No messages yet.</div>
+            <div className="small" style={{ marginTop: 10 }}>No messages yet.</div>
           ) : (
-            <div className="grid" style={{ gap: 8 }}>
+            <div className="thread-list">
               {items.map((m) => (
-                <div key={m.id} className="small" style={{ padding: 10, border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10 }}>
-                  <div className="kv">
+                <div key={m.id} className="thread-msg">
+                  <div className="thread-msg-meta">
                     <span className="pill">{m.sender_role}</span>
-                    <span className="small">{new Date(m.created_at).toLocaleString()}</span>
+                    <span>{new Date(m.created_at).toLocaleString()}</span>
                   </div>
-                  <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{m.message}</div>
+                  <div className="thread-msg-body">{m.message}</div>
                 </div>
               ))}
             </div>
           )}
 
-          <form onSubmit={send} className="grid" style={{ gap: 8 }}>
-            <textarea className="textarea" placeholder="Write a message…" value={draft} onChange={(e) => setDraft(e.target.value)} />
-            <div className="row" style={{ gap: 8 }}>
-              <button className="btn primary" type="submit" disabled={sending || !draft.trim()}>
+          <form onSubmit={send} className="thread-compose">
+            <textarea
+              className="textarea"
+              placeholder="Write a message…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <div className="row">
+              <button className="btn sm primary" type="submit" disabled={sending || !draft.trim()}>
                 {sending ? "Sending…" : "Send"}
               </button>
-              <button className="btn" type="button" onClick={load} disabled={loading || sending}>
-                Refresh messages
+              <button className="btn sm" type="button" onClick={load} disabled={loading || sending}>
+                Refresh
               </button>
             </div>
           </form>
-        </div>
+        </>
       )}
     </div>
   );
 }
+
+/* --- Page --- */
 
 export default function FarmerOrders() {
   const toast = useToast();
@@ -108,7 +116,6 @@ export default function FarmerOrders() {
   const [items, setItems] = useState([]);
   const [pageError, setPageError] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [updatingId, setUpdatingId] = useState(null);
 
   const canInteract = useMemo(() => !loading && updatingId === null, [loading, updatingId]);
@@ -149,92 +156,151 @@ export default function FarmerOrders() {
     }
   }
 
-  return (
-    <div className="container">
-      <PageHeader
-        title="Incoming Orders"
-        subtitle="Accept, reject, or complete incoming buyer requests."
-        right={
-          <button className="btn" onClick={load} disabled={!canInteract}>
+  // Group orders so pending ones bubble to the top — useful for farmers
+  const sorted = useMemo(() => {
+    const rank = { pending: 0, accepted: 1, completed: 2, rejected: 3 };
+    return [...items].sort((a, b) => {
+      const ra = rank[(a.status || "").toLowerCase()] ?? 99;
+      const rb = rank[(b.status || "").toLowerCase()] ?? 99;
+      if (ra !== rb) return ra - rb;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+  }, [items]);
+
+  const pendingCount = useMemo(
+    () => items.filter((o) => (o.status || "").toLowerCase() === "pending").length,
+    [items]
+  );
+
+  const header = (
+    <PageHeader
+      title="Incoming orders"
+      subtitle="Accept, reject, or complete buyer requests."
+      right={
+        <div className="row" style={{ gap: 8 }}>
+          {pendingCount > 0 ? (
+            <span className="pill warning">{pendingCount} pending</span>
+          ) : items.length > 0 ? (
+            <span className="pill success">All caught up</span>
+          ) : null}
+          <button className="btn sm" onClick={load} disabled={!canInteract}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
-        }
-      />
-
-      {pageError ? (
-        <div className="card">
-          <div className="error">{pageError}</div>
         </div>
-      ) : loading ? (
-        <div className="card">
-          <div className="small">Loading incoming orders…</div>
-        </div>
-      ) : items.length === 0 ? (
-        <EmptyState title="No incoming orders" message="When buyers request your crops, their orders will appear here." />
-      ) : (
-        <div className="grid">
-          {items.map((o) => {
-            const busy = updatingId === o.id;
-            const actions = allowedActions(o.status);
-            const disableAll = busy || loading;
+      }
+    />
+  );
 
-            return (
-              <div key={o.id} className="card">
-                <div className="kv">
-                  <strong>{o.crop?.name || "Crop"}</strong>
-                  <span className="pill">{o.status}</span>
+  if (loading && items.length === 0) {
+    return (
+      <>
+        {header}
+        <div className="card"><div className="small">Loading incoming orders…</div></div>
+      </>
+    );
+  }
+
+  if (!loading && items.length === 0) {
+    return (
+      <>
+        {header}
+        <EmptyState
+          title="No incoming orders"
+          message="When buyers request your crops, their orders will appear here."
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {header}
+
+      <div className="grid">
+        {sorted.map((o) => {
+          const busy = updatingId === o.id;
+          const actions = allowedActions(o.status);
+          const disableAll = busy || loading;
+
+          return (
+            <div key={o.id} className="card listing-card">
+              <div className="listing-head">
+                <div>
+                  <h3 className="listing-title">{o.crop?.name || "Crop"}</h3>
+                  <div className="row" style={{ gap: 6, marginTop: 4 }}>
+                    <StatusPill status={o.status} />
+                    <span className="xs">
+                      {new Date(o.created_at).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
+              </div>
 
-                <div className="small">Location: {o.crop?.location}</div>
-
-                <div className="small">
-                  Qty requested: <b>{o.quantity_requested}</b> {o.crop?.unit}
-                </div>
+              <dl className="stat-list" style={{ marginTop: 12 }}>
+                <dt>Quantity</dt>
+                <dd>{formatNumber(o.quantity_requested)} {o.crop?.unit}</dd>
 
                 {o.proposed_price != null && (
-                  <div className="small">
-                    Proposed price: <b>KES {o.proposed_price}</b> / {o.crop?.unit}
-                  </div>
+                  <>
+                    <dt>Proposed price</dt>
+                    <dd>{formatKsh(o.proposed_price, { precise: true })} / {o.crop?.unit}</dd>
+                  </>
                 )}
+
+                <dt>Location</dt>
+                <dd>{o.crop?.location}</dd>
+
+                <dt>Contact</dt>
+                <dd style={{ whiteSpace: "pre-wrap" }}>{o.contact_details}</dd>
 
                 {o.delivery_notes && (
-                  <div className="small" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
-                    Delivery notes: {o.delivery_notes}
-                  </div>
+                  <>
+                    <dt>Notes</dt>
+                    <dd style={{ whiteSpace: "pre-wrap" }}>{o.delivery_notes}</dd>
+                  </>
                 )}
+              </dl>
 
-                <div className="small" style={{ marginTop: 6 }}>
-                  Contact: {o.contact_details}
-                </div>
-
-                <div className="row" style={{ marginTop: 10 }}>
-                  {actions.accept && (
-                    <button className="btn primary" onClick={() => setStatus(o.id, "accepted")} disabled={disableAll} title={busy ? "Updating…" : "Accept order"}>
-                      {busy ? "Updating…" : "Accept"}
-                    </button>
-                  )}
-
-                  {actions.reject && (
-                    <button className="btn danger" onClick={() => setStatus(o.id, "rejected")} disabled={disableAll}>
-                      Reject
-                    </button>
-                  )}
-
-                  {actions.complete && (
-                    <button className="btn" onClick={() => setStatus(o.id, "completed")} disabled={disableAll}>
-                      Complete
-                    </button>
-                  )}
-
-                  {!actions.accept && !actions.reject && !actions.complete && <span className="pill">No actions available</span>}
-                </div>
-
-                <MessageThread orderId={o.id} />
+              <div className="listing-actions">
+                {actions.accept && (
+                  <button
+                    className="btn sm primary"
+                    onClick={() => setStatus(o.id, "accepted")}
+                    disabled={disableAll}
+                  >
+                    {busy ? "Updating…" : "Accept"}
+                  </button>
+                )}
+                {actions.reject && (
+                  <button
+                    className="btn sm danger"
+                    onClick={() => setStatus(o.id, "rejected")}
+                    disabled={disableAll}
+                  >
+                    Reject
+                  </button>
+                )}
+                {actions.complete && (
+                  <button
+                    className="btn sm"
+                    onClick={() => setStatus(o.id, "completed")}
+                    disabled={disableAll}
+                  >
+                    Mark completed
+                  </button>
+                )}
+                {!actions.accept && !actions.reject && !actions.complete && (
+                  <span className="small">No actions available for {o.status} orders.</span>
+                )}
               </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+
+              <MessageThread orderId={o.id} />
+            </div>
+          );
+        })}
+      </div>
+
+      {pageError && <div className="error" style={{ marginTop: 12 }}>{pageError}</div>}
+    </>
   );
 }

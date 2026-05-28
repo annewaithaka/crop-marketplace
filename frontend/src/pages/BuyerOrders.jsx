@@ -1,18 +1,21 @@
 // frontend/src/pages/BuyerOrders.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api.js";
 import PageHeader from "../components/PageHeader.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import StatusPill from "../components/StatusPill.jsx";
 import { useToast } from "../context/ToastContext.jsx";
-import { Link } from "react-router-dom";
+import { formatKsh, formatNumber } from "../utils/format.js";
 
 function mapsUrl(lat, lng) {
   return `https://www.google.com/maps?q=${encodeURIComponent(lat)},${encodeURIComponent(lng)}`;
 }
 
-function MessageThread({ orderId, title = "Messages" }) {
-  const toast = useToast();
+/* --- Message thread (quiet style, matches farmer side) --- */
 
+function MessageThread({ orderId }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
@@ -25,7 +28,11 @@ function MessageThread({ orderId, title = "Messages" }) {
       const res = await api.orderMessages(orderId);
       setItems(res.items || []);
     } catch (e) {
-      toast.show({ type: "error", title: "Could not load messages", message: e?.message || "Failed to load messages." });
+      toast.show({
+        type: "error",
+        title: "Could not load messages",
+        message: e?.message || "Failed to load messages.",
+      });
     } finally {
       setLoading(false);
     }
@@ -35,15 +42,17 @@ function MessageThread({ orderId, title = "Messages" }) {
     e.preventDefault();
     const msg = draft.trim();
     if (!msg) return;
-
     setSending(true);
     try {
       const res = await api.sendOrderMessage(orderId, msg);
-      const item = res.item;
-      setItems((prev) => [...prev, ...(item ? [item] : [])]);
+      if (res.item) setItems((prev) => [...prev, res.item]);
       setDraft("");
     } catch (e2) {
-      toast.show({ type: "error", title: "Send failed", message: e2?.message || "Could not send message." });
+      toast.show({
+        type: "error",
+        title: "Send failed",
+        message: e2?.message || "Could not send message.",
+      });
     } finally {
       setSending(false);
     }
@@ -55,50 +64,57 @@ function MessageThread({ orderId, title = "Messages" }) {
   }, [open]);
 
   return (
-    <div className="card" style={{ marginTop: 10 }}>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <strong>{title}</strong>
-        <button className="btn" type="button" onClick={() => setOpen((p) => !p)}>
+    <div className="thread">
+      <div className="thread-head">
+        <span className="thread-title">Messages with farmer</span>
+        <button className="btn sm ghost" type="button" onClick={() => setOpen((p) => !p)}>
           {open ? "Hide" : "Open"}
         </button>
       </div>
 
       {open && (
-        <div className="grid" style={{ marginTop: 10 }}>
+        <>
           {loading ? (
-            <div className="small">Loading messages…</div>
+            <div className="small" style={{ marginTop: 10 }}>Loading messages…</div>
           ) : items.length === 0 ? (
-            <div className="small">No messages yet.</div>
+            <div className="small" style={{ marginTop: 10 }}>No messages yet.</div>
           ) : (
-            <div className="grid" style={{ gap: 8 }}>
+            <div className="thread-list">
               {items.map((m) => (
-                <div key={m.id} className="small" style={{ padding: 10, border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10 }}>
-                  <div className="kv">
+                <div key={m.id} className="thread-msg">
+                  <div className="thread-msg-meta">
                     <span className="pill">{m.sender_role}</span>
-                    <span className="small">{new Date(m.created_at).toLocaleString()}</span>
+                    <span>{new Date(m.created_at).toLocaleString()}</span>
                   </div>
-                  <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{m.message}</div>
+                  <div className="thread-msg-body">{m.message}</div>
                 </div>
               ))}
             </div>
           )}
 
-          <form onSubmit={send} className="grid" style={{ gap: 8 }}>
-            <textarea className="textarea" placeholder="Write a message…" value={draft} onChange={(e) => setDraft(e.target.value)} />
-            <div className="row" style={{ gap: 8 }}>
-              <button className="btn primary" type="submit" disabled={sending || !draft.trim()}>
+          <form onSubmit={send} className="thread-compose">
+            <textarea
+              className="textarea"
+              placeholder="Write a message…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <div className="row">
+              <button className="btn sm primary" type="submit" disabled={sending || !draft.trim()}>
                 {sending ? "Sending…" : "Send"}
               </button>
-              <button className="btn" type="button" onClick={load} disabled={loading || sending}>
-                Refresh messages
+              <button className="btn sm" type="button" onClick={load} disabled={loading || sending}>
+                Refresh
               </button>
             </div>
           </form>
-        </div>
+        </>
       )}
     </div>
   );
 }
+
+/* --- Page --- */
 
 export default function BuyerOrders() {
   const toast = useToast();
@@ -137,100 +153,140 @@ export default function BuyerOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hasAny = useMemo(() => items.length > 0, [items]);
+  const header = (
+    <PageHeader
+      title="My orders"
+      subtitle="Track the status of crops you’ve requested."
+      right={
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn sm" onClick={load} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+      }
+    />
+  );
+
+  if (loading && items.length === 0) {
+    return (
+      <div className="container">
+        {header}
+        <div className="card"><div className="small">Loading your orders…</div></div>
+      </div>
+    );
+  }
+
+  if (!loading && items.length === 0) {
+    return (
+      <div className="container">
+        {header}
+        <EmptyState
+          title="No orders yet"
+          message="Browse crops and send an order request. Your requests will appear here."
+          action={<Link className="btn primary" to="/buyer">Browse crops</Link>}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="container">
-      <PageHeader
-        title="My Orders"
-        subtitle="Track the status of the orders you requested."
-        right={
-          <button className="btn" onClick={load} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        }
-      />
+      {header}
 
-      {pageError ? (
-        <div className="card">
-          <div className="error">{pageError}</div>
-        </div>
-      ) : loading ? (
-        <div className="card">
-          <div className="small">Loading your orders…</div>
-        </div>
-      ) : !hasAny ? (
-        <EmptyState title="No orders yet" message="Browse crops and send an order request. Your requests will appear here." action={<Link className="btn primary" to="/buyer">Browse crops</Link>} />
-      ) : (
-        <div className="grid">
-          {items.map((o) => {
-            const pickup = o.pickup_location;
-            const showPickup = Boolean(pickup && (o.status === "accepted" || o.status === "completed"));
+      <div className="grid">
+        {items.map((o) => {
+          const pickup = o.pickup_location;
+          const showPickup = Boolean(
+            pickup && (o.status === "accepted" || o.status === "completed")
+          );
 
-            return (
-              <div key={o.id} className="card">
-                <div className="kv">
-                  <strong>{o.crop?.name || "Crop"}</strong>
-                  <span className="pill">{o.status}</span>
+          return (
+            <div key={o.id} className="card listing-card">
+              <div className="listing-head">
+                <div>
+                  <h3 className="listing-title">{o.crop?.name || "Crop"}</h3>
+                  <div className="row" style={{ gap: 6, marginTop: 4 }}>
+                    <StatusPill status={o.status} />
+                    <span className="xs">
+                      {new Date(o.created_at).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
+              </div>
 
-                <div className="small">Location label: {o.crop?.location}</div>
+              <dl className="stat-list" style={{ marginTop: 12 }}>
+                <dt>Quantity</dt>
+                <dd>{formatNumber(o.quantity_requested)} {o.crop?.unit}</dd>
 
-                <div className="small">
-                  Quantity requested: <b>{o.quantity_requested}</b> {o.crop?.unit}
-                </div>
+                <dt>Listed price</dt>
+                <dd>{formatKsh(o.crop?.price_per_unit, { precise: true })} / {o.crop?.unit}</dd>
 
                 {o.proposed_price != null && (
-                  <div className="small">
-                    Proposed price: <b>KES {o.proposed_price}</b> / {o.crop?.unit}
-                  </div>
+                  <>
+                    <dt>Your offer</dt>
+                    <dd>{formatKsh(o.proposed_price, { precise: true })} / {o.crop?.unit}</dd>
+                  </>
                 )}
+
+                <dt>Location</dt>
+                <dd>{o.crop?.location}</dd>
 
                 {o.delivery_notes && (
-                  <div className="small" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
-                    Delivery notes: {o.delivery_notes}
-                  </div>
+                  <>
+                    <dt>Notes</dt>
+                    <dd style={{ whiteSpace: "pre-wrap" }}>{o.delivery_notes}</dd>
+                  </>
                 )}
+              </dl>
 
-                {showPickup ? (
-                  <div style={{ marginTop: 10 }} className="grid">
-                    <div className="small">
-                      <b>Pickup pin unlocked</b>
-                      {pickup?.county || pickup?.town ? (
-                        <span>
-                          {" "}
-                          — {pickup?.town || ""}
-                          {pickup?.town && pickup?.county ? ", " : ""}
-                          {pickup?.county || ""}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                      <a className="btn primary" href={mapsUrl(pickup.lat, pickup.lng)} target="_blank" rel="noreferrer">
-                        Open in Google Maps
-                      </a>
-                      <button className="btn" type="button" onClick={() => copyCoords(pickup.lat, pickup.lng)}>
-                        Copy coordinates
-                      </button>
-                    </div>
-
-                    <div className="small">
-                      Coordinates: <code>{pickup.lat}, {pickup.lng}</code>
-                    </div>
+              {showPickup ? (
+                <div className="pickup-block">
+                  <div className="pickup-block-title">
+                    📍 Pickup location unlocked
                   </div>
-                ) : (
-                  <div className="small" style={{ marginTop: 10 }}>
-                    Pickup pin will appear after the farmer accepts your order.
+                  {(pickup.town || pickup.county) && (
+                    <div className="small">
+                      {[pickup.town, pickup.county].filter(Boolean).join(", ")}
+                    </div>
+                  )}
+                  <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <a
+                      className="btn sm primary"
+                      href={mapsUrl(pickup.lat, pickup.lng)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open in Google Maps
+                    </a>
+                    <button
+                      className="btn sm"
+                      type="button"
+                      onClick={() => copyCoords(pickup.lat, pickup.lng)}
+                    >
+                      Copy coordinates
+                    </button>
                   </div>
-                )}
+                  <div className="pickup-block-coords">
+                    {pickup.lat}, {pickup.lng}
+                  </div>
+                </div>
+              ) : o.status === "pending" ? (
+                <div className="pickup-pending">
+                  Pickup location will appear here once the farmer accepts your order.
+                </div>
+              ) : o.status === "rejected" ? (
+                <div className="pickup-pending">
+                  This order was rejected by the farmer.
+                </div>
+              ) : null}
 
-                <MessageThread orderId={o.id} />
-              </div>
-            );
-          })}
-        </div>
-      )}
+              <MessageThread orderId={o.id} />
+            </div>
+          );
+        })}
+      </div>
+
+      {pageError && <div className="error" style={{ marginTop: 12 }}>{pageError}</div>}
     </div>
   );
 }

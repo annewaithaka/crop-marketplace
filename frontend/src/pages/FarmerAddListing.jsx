@@ -3,31 +3,27 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.js";
 import { useToast } from "../context/ToastContext.jsx";
 import ImagePicker from "../components/ImagePicker.jsx";
+import PageHeader from "../components/PageHeader.jsx";
 
 const UNITS = [
-  { value: "kg", label: "Kilograms (kg)" },
-  { value: "bag", label: "Bags (bag)" },
+  { value: "kg",    label: "Kilograms (kg)" },
+  { value: "bag",   label: "Bags (bag)" },
   { value: "crate", label: "Crates (crate)" },
   { value: "piece", label: "Pieces (piece)" },
 ];
 
-const KENYA_CENTER = { lat: -0.0236, lng: 37.9062 }; // roughly Kenya center
+const KENYA_CENTER = { lat: -0.0236, lng: 37.9062 };
 
-function toNumber(value) {
-  if (value === "" || value === null || value === undefined) return NaN;
-  return Number(value);
+function toNumber(v) {
+  if (v === "" || v === null || v === undefined) return NaN;
+  return Number(v);
 }
-
-function toOptionalNumber(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  const n = Number(value);
+function toOptionalNumber(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
   return Number.isNaN(n) ? NaN : n;
 }
-
-function clampToThree(files) {
-  return (files || []).slice(0, 3);
-}
-
+function clampToThree(files) { return (files || []).slice(0, 3); }
 function fmtCoord(n) {
   if (n === "" || n === null || n === undefined) return "";
   const v = Number(n);
@@ -54,7 +50,6 @@ export default function FarmerAddListing() {
     pack_size_kg: "",
     min_order_qty: "",
   });
-
   const [images, setImages] = useState([]);
   const [fieldErrors, setFieldErrors] = useState({});
   const [pageError, setPageError] = useState("");
@@ -78,17 +73,12 @@ export default function FarmerAddListing() {
 
     async function initMap() {
       if (!mapElRef.current || mapRef.current) return;
-
       const L = (await import("leaflet")).default;
 
-      const map = L.map(mapElRef.current, {
-        zoomControl: true,
-        attributionControl: true,
-      }).setView([KENYA_CENTER.lat, KENYA_CENTER.lng], 6);
+      const map = L.map(mapElRef.current, { zoomControl: true, attributionControl: true })
+        .setView([KENYA_CENTER.lat, KENYA_CENTER.lng], 6);
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      }).addTo(map);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
       const marker = L.marker([KENYA_CENTER.lat, KENYA_CENTER.lng], { draggable: true }).addTo(map);
 
@@ -98,7 +88,6 @@ export default function FarmerAddListing() {
       }
 
       marker.on("dragend", syncFromMarker);
-
       map.on("click", (e) => {
         marker.setLatLng(e.latlng);
         syncFromMarker();
@@ -106,12 +95,10 @@ export default function FarmerAddListing() {
 
       mapRef.current = map;
       markerRef.current = marker;
-
       if (!cancelled) setMapReady(true);
     }
 
     initMap();
-
     return () => {
       cancelled = true;
       try {
@@ -120,17 +107,14 @@ export default function FarmerAddListing() {
           mapRef.current = null;
           markerRef.current = null;
         }
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     };
   }, []);
 
   function validate() {
     const next = {};
-
     if (!form.name.trim()) next.name = "Crop name is required.";
-    if (!form.location.trim()) next.location = "Location is required.";
+    if (!form.location.trim()) next.location = "Location label is required.";
 
     const qty = toNumber(form.quantity);
     if (Number.isNaN(qty)) next.quantity = "Quantity is required.";
@@ -142,7 +126,7 @@ export default function FarmerAddListing() {
 
     const lat = toNumber(form.lat);
     const lng = toNumber(form.lng);
-    if (Number.isNaN(lat) || Number.isNaN(lng)) next.location_pin = "Pinned location is required (tap the map).";
+    if (Number.isNaN(lat) || Number.isNaN(lng)) next.location_pin = "Please tap or drag on the map to pin the pickup location.";
     else {
       if (lat < -90 || lat > 90) next.lat = "Latitude must be between -90 and 90.";
       if (lng < -180 || lng > 180) next.lng = "Longitude must be between -180 and 180.";
@@ -167,20 +151,17 @@ export default function FarmerAddListing() {
     return Object.keys(next).length === 0;
   }
 
-  async function useMyLocation() {
+  function useMyLocation() {
     setFieldErrors((p) => ({ ...p, location_pin: undefined, lat: undefined, lng: undefined }));
     if (!navigator.geolocation) {
       toast.show({ type: "error", title: "Geolocation unavailable", message: "Your browser does not support location." });
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-
         setForm((p) => ({ ...p, lat: String(lat), lng: String(lng) }));
-
         const map = mapRef.current;
         const marker = markerRef.current;
         if (map && marker) {
@@ -189,21 +170,32 @@ export default function FarmerAddListing() {
         }
       },
       () => {
-        toast.show({
-          type: "error",
-          title: "Could not get location",
-          message: "Enable location permission and try again.",
-        });
+        toast.show({ type: "error", title: "Could not get location", message: "Enable location permission and try again." });
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );
+  }
+
+  function resetForm() {
+    setForm({
+      name: "", quantity: "", unit: "kg", price_per_unit: "",
+      location: "", county: "", town: "",
+      lat: "", lng: "",
+      pack_size_kg: "", min_order_qty: "",
+    });
+    setImages([]);
+    const map = mapRef.current;
+    const marker = markerRef.current;
+    if (map && marker) {
+      marker.setLatLng([KENYA_CENTER.lat, KENYA_CENTER.lng]);
+      map.setView([KENYA_CENTER.lat, KENYA_CENTER.lng], 6);
+    }
   }
 
   async function create(e) {
     e.preventDefault();
     setFieldErrors({});
     setPageError("");
-
     if (!validate()) return;
 
     setSubmitting(true);
@@ -233,30 +225,10 @@ export default function FarmerAddListing() {
       toast.show({
         type: "success",
         title: "Listing added",
-        message: images.length > 0 ? "Listing added with images." : "Listing added.",
+        message: images.length > 0 ? "Listing added with photos." : "Listing added.",
       });
 
-      setForm({
-        name: "",
-        quantity: "",
-        unit: "kg",
-        price_per_unit: "",
-        location: "",
-        county: "",
-        town: "",
-        lat: "",
-        lng: "",
-        pack_size_kg: "",
-        min_order_qty: "",
-      });
-      setImages([]);
-
-      const map = mapRef.current;
-      const marker = markerRef.current;
-      if (map && marker) {
-        marker.setLatLng([KENYA_CENTER.lat, KENYA_CENTER.lng]);
-        map.setView([KENYA_CENTER.lat, KENYA_CENTER.lng], 6);
-      }
+      resetForm();
     } catch (e2) {
       const msg = e2?.message || "Failed to add listing.";
       setPageError(msg);
@@ -267,184 +239,183 @@ export default function FarmerAddListing() {
   }
 
   return (
-    <div className="card">
-      <div className="small" style={{ marginTop: 6 }}>
-        Add up to 3 images (jpg/png/webp). Images upload after the listing is created.
-      </div>
-
-      <form onSubmit={create} className="grid" style={{ maxWidth: 760, marginTop: 12 }} noValidate>
-        <div className="grid">
-          <label>Crop name</label>
-          <input
-            className="input"
-            placeholder="e.g. Maize"
-            value={form.name}
-            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-            aria-invalid={Boolean(fieldErrors.name)}
-          />
-          {fieldErrors.name && <div className="error">{fieldErrors.name}</div>}
-        </div>
-
-        <div className="row">
-          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
-            <label>Quantity</label>
+    <>
+      <PageHeader
+        title="Add listing"
+        subtitle="Create a new crop listing. Buyers will be able to find it and send order requests."
+      />
+      <div className="card">
+      <form onSubmit={create} noValidate>
+        <div className="form-section">
+          <div className="form-section-title">Basics</div>
+          <div className="field">
+            <label>Crop name</label>
             <input
               className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="e.g. 120"
-              value={form.quantity}
-              onChange={(e) => setForm((p) => ({ ...p, quantity: e.target.value }))}
-              aria-invalid={Boolean(fieldErrors.quantity)}
+              placeholder="e.g. Maize"
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
             />
-            {fieldErrors.quantity && <div className="error">{fieldErrors.quantity}</div>}
+            {fieldErrors.name && <div className="field-error">{fieldErrors.name}</div>}
+          </div>
+        </div>
+
+        <div className="form-section">
+          <div className="form-section-title">Quantity & price</div>
+          <div className="form-row-3">
+            <div className="field">
+              <label>Quantity</label>
+              <input
+                className="input"
+                type="number" min="0" step="0.01"
+                placeholder="e.g. 120"
+                value={form.quantity}
+                onChange={(e) => setForm((p) => ({ ...p, quantity: e.target.value }))}
+              />
+              {fieldErrors.quantity && <div className="field-error">{fieldErrors.quantity}</div>}
+            </div>
+            <div className="field">
+              <label>Unit</label>
+              <select
+                className="select"
+                value={form.unit}
+                onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
+              >
+                {UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Price per unit (KSh)</label>
+              <input
+                className="input"
+                type="number" min="0" step="0.01"
+                placeholder="e.g. 3000"
+                value={form.price_per_unit}
+                onChange={(e) => setForm((p) => ({ ...p, price_per_unit: e.target.value }))}
+              />
+              {fieldErrors.price_per_unit && <div className="field-error">{fieldErrors.price_per_unit}</div>}
+            </div>
           </div>
 
-          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
-            <label>Unit</label>
-            <select
-              className="select"
-              value={form.unit}
-              onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
+          <div className="form-row" style={{ marginTop: 12 }}>
+            <div className="field">
+              <label>Pack size (kg)</label>
+              <input
+                className="input"
+                type="number" min="0" step="0.01"
+                placeholder="e.g. 90"
+                value={form.pack_size_kg}
+                onChange={(e) => setForm((p) => ({ ...p, pack_size_kg: e.target.value }))}
+              />
+              <div className="field-help">Optional. Useful for buyers who think in bags or crates.</div>
+              {fieldErrors.pack_size_kg && <div className="field-error">{fieldErrors.pack_size_kg}</div>}
+            </div>
+            <div className="field">
+              <label>Minimum order qty</label>
+              <input
+                className="input"
+                type="number" min="0" step="0.01"
+                placeholder={`e.g. 10`}
+                value={form.min_order_qty}
+                onChange={(e) => setForm((p) => ({ ...p, min_order_qty: e.target.value }))}
+              />
+              <div className="field-help">Optional.</div>
+              {fieldErrors.min_order_qty && <div className="field-error">{fieldErrors.min_order_qty}</div>}
+            </div>
+          </div>
+        </div>
+
+        <div className="form-section">
+          <div className="form-section-title">Pickup location</div>
+          <div className="field">
+            <label>Location label</label>
+            <input
+              className="input"
+              placeholder="e.g. Eldoret / Kapsabet Road"
+              value={form.location}
+              onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+            />
+            <div className="field-help">Shown to buyers before they place an order.</div>
+            {fieldErrors.location && <div className="field-error">{fieldErrors.location}</div>}
+          </div>
+
+          <div className="form-row" style={{ marginTop: 12 }}>
+            <div className="field">
+              <label>County</label>
+              <input
+                className="input"
+                placeholder="e.g. Uasin Gishu"
+                value={form.county}
+                onChange={(e) => setForm((p) => ({ ...p, county: e.target.value }))}
+              />
+              <div className="field-help">Optional.</div>
+            </div>
+            <div className="field">
+              <label>Town</label>
+              <input
+                className="input"
+                placeholder="e.g. Eldoret"
+                value={form.town}
+                onChange={(e) => setForm((p) => ({ ...p, town: e.target.value }))}
+              />
+              <div className="field-help">Optional.</div>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 14, justifyContent: "space-between" }}>
+            <div className="field-help" style={{ margin: 0 }}>
+              Tap or drag on the map to pin pickup. Buyers only see exact coordinates after you accept their order.
+            </div>
+            <button
+              className="btn sm"
+              type="button"
+              onClick={useMyLocation}
+              disabled={submitting || !mapReady}
             >
-              {UNITS.map((u) => (
-                <option key={u.value} value={u.value}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid">
-          <label>Price per unit (KES)</label>
-          <input
-            className="input"
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="e.g. 3000"
-            value={form.price_per_unit}
-            onChange={(e) => setForm((p) => ({ ...p, price_per_unit: e.target.value }))}
-            aria-invalid={Boolean(fieldErrors.price_per_unit)}
-          />
-          {fieldErrors.price_per_unit && <div className="error">{fieldErrors.price_per_unit}</div>}
-        </div>
-
-        <div className="row">
-          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
-            <label>Pack size (kg) (optional)</label>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="e.g. 90"
-              value={form.pack_size_kg}
-              onChange={(e) => setForm((p) => ({ ...p, pack_size_kg: e.target.value }))}
-              aria-invalid={Boolean(fieldErrors.pack_size_kg)}
-            />
-            {fieldErrors.pack_size_kg && <div className="error">{fieldErrors.pack_size_kg}</div>}
-          </div>
-
-          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
-            <label>Minimum order qty (optional)</label>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder={`e.g. 10 (${form.unit})`}
-              value={form.min_order_qty}
-              onChange={(e) => setForm((p) => ({ ...p, min_order_qty: e.target.value }))}
-              aria-invalid={Boolean(fieldErrors.min_order_qty)}
-            />
-            {fieldErrors.min_order_qty && <div className="error">{fieldErrors.min_order_qty}</div>}
-          </div>
-        </div>
-
-        <div className="grid">
-          <label>Location label (what buyers see before acceptance)</label>
-          <input
-            className="input"
-            placeholder="e.g. Eldoret / Kapsabet Road"
-            value={form.location}
-            onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
-            aria-invalid={Boolean(fieldErrors.location)}
-          />
-          {fieldErrors.location && <div className="error">{fieldErrors.location}</div>}
-        </div>
-
-        <div className="row">
-          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
-            <label>County (optional)</label>
-            <input
-              className="input"
-              placeholder="e.g. Uasin Gishu"
-              value={form.county}
-              onChange={(e) => setForm((p) => ({ ...p, county: e.target.value }))}
-            />
-          </div>
-          <div className="grid" style={{ flex: 1, minWidth: 180 }}>
-            <label>Town (optional)</label>
-            <input
-              className="input"
-              placeholder="e.g. Eldoret"
-              value={form.town}
-              onChange={(e) => setForm((p) => ({ ...p, town: e.target.value }))}
-            />
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: 12 }}>
-          <div className="kv">
-            <strong>Pin pickup location (required)</strong>
-            <button className="btn" type="button" onClick={useMyLocation} disabled={submitting || !mapReady}>
               Use my location
             </button>
           </div>
 
-          <div
-            ref={mapElRef}
-            style={{
-              height: 320,
-              width: "100%",
-              borderRadius: 12,
-              overflow: "hidden",
-              marginTop: 10,
-              border: "1px solid rgba(0,0,0,0.08)",
-            }}
-          />
+          <div ref={mapElRef} className="map-box" />
 
-          <div className="row" style={{ marginTop: 10 }}>
-            <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+          <div className="form-row" style={{ marginTop: 12 }}>
+            <div className="field">
               <label>Latitude</label>
-              <input className="input" value={fmtCoord(form.lat)} readOnly aria-invalid={Boolean(fieldErrors.lat)} />
-              {fieldErrors.lat && <div className="error">{fieldErrors.lat}</div>}
+              <input className="input" value={fmtCoord(form.lat)} readOnly />
+              {fieldErrors.lat && <div className="field-error">{fieldErrors.lat}</div>}
             </div>
-            <div className="grid" style={{ flex: 1, minWidth: 180 }}>
+            <div className="field">
               <label>Longitude</label>
-              <input className="input" value={fmtCoord(form.lng)} readOnly aria-invalid={Boolean(fieldErrors.lng)} />
-              {fieldErrors.lng && <div className="error">{fieldErrors.lng}</div>}
+              <input className="input" value={fmtCoord(form.lng)} readOnly />
+              {fieldErrors.lng && <div className="field-error">{fieldErrors.lng}</div>}
             </div>
           </div>
-
-          {fieldErrors.location_pin && <div className="error">{fieldErrors.location_pin}</div>}
-          <div className="small" style={{ marginTop: 8 }}>
-            Buyers will only see the pinned location after you accept their order.
-          </div>
+          {fieldErrors.location_pin && <div className="field-error">{fieldErrors.location_pin}</div>}
         </div>
 
-        <ImagePicker disabled={submitting} value={images} onChange={setImages} />
-        {fieldErrors.images && <div className="error">{fieldErrors.images}</div>}
+        <div className="form-section">
+          <div className="form-section-title">Photos</div>
+          <div className="field-help">
+            Add up to 3 photos (jpg, png, or webp). They’ll upload once the listing is created.
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <ImagePicker disabled={submitting} value={images} onChange={setImages} />
+          </div>
+          {fieldErrors.images && <div className="field-error">{fieldErrors.images}</div>}
+        </div>
 
-        <button className="btn primary" type="submit" disabled={!canSubmit}>
-          {submitting ? "Adding…" : "Add listing"}
-        </button>
+        {pageError && <div className="error" style={{ marginBottom: 12 }}>{pageError}</div>}
 
-        {pageError && <div className="error">{pageError}</div>}
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn" type="button" onClick={resetForm} disabled={submitting}>
+            Clear
+          </button>
+          <button className="btn primary" type="submit" disabled={!canSubmit}>
+            {submitting ? "Adding…" : "Add listing"}
+          </button>
+        </div>
       </form>
     </div>
+    </>
   );
 }

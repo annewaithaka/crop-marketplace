@@ -107,7 +107,7 @@ export default function Register() {
               className="input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder="you@gmail.com"
               inputMode="email"
               autoComplete="email"
               aria-invalid={Boolean(fieldErrors.email)}

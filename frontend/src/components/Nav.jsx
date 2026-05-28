@@ -2,7 +2,6 @@
 import React from "react";
 import { NavLink, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useTheme } from "../context/ThemeContext.jsx";
 
 function AppNavLink(props) {
   return (
@@ -15,69 +14,63 @@ function AppNavLink(props) {
 
 export default function Nav() {
   const { user, logout } = useAuth();
-  const { theme, toggle } = useTheme();
   const nav = useNavigate();
 
   return (
     <div className="nav">
       <div className="nav-inner">
         <Link className="brand" to="/">
-          🌾 Crop Marketplace
+          <span className="brand-mark" aria-hidden="true">C</span>
+          Crop Marketplace
         </Link>
 
         <div className="nav-links">
           {!user && (
             <>
-              <AppNavLink to="/login">Login</AppNavLink>
+              <AppNavLink to="/login">Sign in</AppNavLink>
               <AppNavLink to="/register">Register</AppNavLink>
             </>
           )}
 
           {user?.role === "buyer" && (
             <>
-              <AppNavLink to="/buyer" end>
-                Browse
-              </AppNavLink>
-              <AppNavLink to="/buyer/orders">My Orders</AppNavLink>
+              <AppNavLink to="/buyer" end>Browse</AppNavLink>
+              <AppNavLink to="/buyer/orders">My orders</AppNavLink>
             </>
           )}
 
           {user?.role === "farmer" && (
             <>
-              <AppNavLink to="/farmer/listings">My Listings</AppNavLink>
-              <AppNavLink to="/farmer/add">Add Listing</AppNavLink>
-              <AppNavLink to="/farmer/orders">Incoming Orders</AppNavLink>
+              <AppNavLink to="/farmer/listings">My listings</AppNavLink>
+              <AppNavLink to="/farmer/add">Add listing</AppNavLink>
+              <AppNavLink to="/farmer/orders">Incoming orders</AppNavLink>
             </>
           )}
 
           {user?.role === "admin" && <AppNavLink to="/admin">Admin</AppNavLink>}
         </div>
 
-        <div className="spacer" />
-
         <div className="nav-actions">
-          <button className="btn" onClick={toggle} type="button">
-            {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
-          </button>
-
           {user ? (
             <>
-              <span className="pill">
-                {user.name} • {user.role}
+              <span className="pill brand">
+                {user.name} · {user.role}
               </span>
               <button
-                className="btn"
+                className="btn sm"
                 type="button"
                 onClick={() => {
                   logout();
                   nav("/");
                 }}
               >
-                Logout
+                Sign out
               </button>
             </>
           ) : (
-            <span className="pill">Not signed in</span>
+            <Link className="btn sm primary" to="/register">
+              Get started
+            </Link>
           )}
         </div>
       </div>

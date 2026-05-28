@@ -3,73 +3,196 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import PageHeader from "../components/PageHeader.jsx";
 import EmptyState from "../components/EmptyState.jsx";
-import { useToast } from "../context/ToastContext.jsx";
+import Modal from "../components/Modal.jsx";
 import Lightbox from "../components/Lightbox.jsx";
+import { useToast } from "../context/ToastContext.jsx";
+import { formatKsh, formatNumber } from "../utils/format.js";
 
-function toNumber(value) {
-  if (value === "" || value === null || value === undefined) return NaN;
-  return Number(value);
+function toNumber(v) {
+  if (v === "" || v === null || v === undefined) return NaN;
+  return Number(v);
 }
-
 function isBlank(v) {
   return v === null || v === undefined || String(v).trim() === "";
 }
 
-/**
- * Thumbnails-only gallery (no big image).
- * Clicking any thumbnail opens the lightbox.
- */
-function ListingGalleryThumbs({ crop }) {
-  const images = crop?.images || [];
-  const [open, setOpen] = useState(false);
-  const [activeIdx, setActiveIdx] = useState(0);
+const RADIUS_OPTIONS = [
+  { value: "10", label: "10 km" },
+  { value: "25", label: "25 km" },
+  { value: "50", label: "50 km" },
+  { value: "100", label: "100 km" },
+];
+
+/* --------------------- Order request modal --------------------- */
+
+function OrderRequestModal({ crop, open, onClose, onSubmit }) {
+  const [quantity, setQuantity] = useState("");
+  const [contact, setContact] = useState("");
+  const [proposedPrice, setProposedPrice] = useState("");
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setOpen(false);
-    setActiveIdx(0);
-  }, [crop?.id]);
+    if (open) {
+      setQuantity("");
+      setContact("");
+      setProposedPrice("");
+      setDeliveryNotes("");
+      setErrors({});
+      setSubmitting(false);
+    }
+  }, [open]);
 
-  if (images.length === 0) return null;
+  const estimatedTotal = useMemo(() => {
+    if (!crop) return null;
+    const q = toNumber(quantity);
+    if (Number.isNaN(q) || q <= 0) return null;
+    const unitPrice = isBlank(proposedPrice) ? crop.price_per_unit : toNumber(proposedPrice);
+    if (Number.isNaN(unitPrice) || unitPrice <= 0) return null;
+    return q * unitPrice;
+  }, [crop, quantity, proposedPrice]);
 
-  const active = images[activeIdx]?.url || images[0]?.url;
+  if (!crop) return null;
+
+  function validate() {
+    const next = {};
+    const qty = toNumber(quantity);
+
+    if (Number.isNaN(qty)) next.quantity = "Quantity is required.";
+    else if (qty <= 0) next.quantity = "Quantity must be greater than 0.";
+    else if (crop.min_order_qty != null && qty < crop.min_order_qty) {
+      next.quantity = `Minimum order is ${crop.min_order_qty} ${crop.unit}.`;
+    } else if (qty > crop.quantity) {
+      next.quantity = `Only ${crop.quantity} ${crop.unit} available.`;
+    }
+
+    if (!isBlank(proposedPrice)) {
+      const pp = toNumber(proposedPrice);
+      if (Number.isNaN(pp)) next.proposed_price = "Proposed price must be a number.";
+      else if (pp <= 0) next.proposed_price = "Proposed price must be greater than 0.";
+    }
+
+    if (!contact.trim()) next.contact = "Phone or email is required.";
+
+    if (deliveryNotes && deliveryNotes.length > 2000) {
+      next.delivery_notes = "Notes too long (max 2000 characters).";
+    }
+
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!validate()) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        crop_id: crop.id,
+        quantity_requested: Number(quantity),
+        contact_details: contact.trim(),
+        proposed_price: isBlank(proposedPrice) ? null : Number(proposedPrice),
+        delivery_notes: deliveryNotes.trim() || null,
+      });
+    } catch (e2) {
+      setErrors((p) => ({ ...p, form: e2?.message || "Failed to send request." }));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
-    <>
-      <div className="thumb-row" aria-label="Listing thumbnails">
-        {images.map((img, idx) => (
-          <div
-            key={img.id ?? `${img.url}-${idx}`}
-            className={`thumb ${idx === activeIdx ? "thumb-active" : ""}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => {
-              setActiveIdx(idx);
-              setOpen(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                setActiveIdx(idx);
-                setOpen(true);
-              }
-            }}
-            aria-label={`Open image ${idx + 1}`}
-            title={`Open image ${idx + 1}`}
-          >
-            <img src={img.url} alt={`${crop.name} thumbnail ${idx + 1}`} loading="lazy" />
-          </div>
-        ))}
-      </div>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Request order — ${crop.name}`}
+      subtitle={`Listed at ${formatKsh(crop.price_per_unit, { precise: true })} / ${crop.unit}`}
+      footer={
+        <>
+          <button className="btn" type="button" onClick={onClose} disabled={submitting}>
+            Cancel
+          </button>
+          <button className="btn primary" type="submit" form="order-form" disabled={submitting}>
+            {submitting ? "Sending…" : "Send request"}
+          </button>
+        </>
+      }
+    >
+      <form id="order-form" onSubmit={submit} noValidate>
+        <div className="form-section">
+          <div className="form-section-title">Your order</div>
 
-      <Lightbox open={open} title={`${crop.name} — image ${activeIdx + 1}/${images.length}`} src={active} onClose={() => setOpen(false)} />
-    </>
+          <div className="field">
+            <label>Quantity ({crop.unit})</label>
+            <input
+              className="input"
+              type="number" min="0" step="0.01"
+              placeholder={`Available: ${crop.quantity} ${crop.unit}`}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+            {crop.min_order_qty != null && (
+              <div className="field-help">Minimum order: {crop.min_order_qty} {crop.unit}.</div>
+            )}
+            {errors.quantity && <div className="field-error">{errors.quantity}</div>}
+          </div>
+
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Proposed price (KSh per {crop.unit})</label>
+            <input
+              className="input"
+              type="number" min="0" step="0.01"
+              placeholder={`Listed: ${crop.price_per_unit}`}
+              value={proposedPrice}
+              onChange={(e) => setProposedPrice(e.target.value)}
+            />
+            <div className="field-help">Leave blank to accept the listed price.</div>
+            {errors.proposed_price && <div className="field-error">{errors.proposed_price}</div>}
+          </div>
+
+          {estimatedTotal !== null && (
+            <div className="banner" style={{ marginTop: 12 }}>
+              <span className="banner-title">Estimated total:</span>
+              {formatKsh(estimatedTotal, { precise: true })}
+            </div>
+          )}
+        </div>
+
+        <div className="form-section">
+          <div className="form-section-title">Delivery & contact</div>
+
+          <div className="field">
+            <label>Delivery notes</label>
+            <textarea
+              className="textarea"
+              placeholder="e.g. Preferred pickup time, transport arrangements…"
+              value={deliveryNotes}
+              onChange={(e) => setDeliveryNotes(e.target.value)}
+            />
+            <div className="field-help">Optional.</div>
+            {errors.delivery_notes && <div className="field-error">{errors.delivery_notes}</div>}
+          </div>
+
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Contact details</label>
+            <textarea
+              className="textarea"
+              placeholder="Phone number, email, or any preferred contact"
+              value={contact}
+              onChange={(e) => setContact(e.target.value)}
+            />
+            {errors.contact && <div className="field-error">{errors.contact}</div>}
+          </div>
+        </div>
+
+        {errors.form && <div className="field-error">{errors.form}</div>}
+      </form>
+    </Modal>
   );
 }
 
-const RADIUS_OPTIONS = [
-  { value: "10", label: "Within 10 km" },
-  { value: "25", label: "Within 25 km" },
-  { value: "50", label: "Within 50 km" },
-];
+/* --------------------- Main page --------------------- */
 
 export default function BuyerBrowse() {
   const toast = useToast();
@@ -77,44 +200,39 @@ export default function BuyerBrowse() {
   const [filters, setFilters] = useState({
     name: "",
     location: "",
-    min_price: "",
-    max_price: "",
     county: "",
     town: "",
+    min_price: "",
+    max_price: "",
   });
 
-  const [geo, setGeo] = useState({
-    lat: "",
-    lng: "",
-    radius_km: "25",
-  });
+  const [geo, setGeo] = useState({ lat: "", lng: "", radius_km: "25" });
+  const distanceEnabled = useMemo(
+    () => geo.lat !== "" && geo.lng !== "" && geo.radius_km !== "",
+    [geo.lat, geo.lng, geo.radius_km]
+  );
 
-  const distanceEnabled = useMemo(() => geo.lat !== "" && geo.lng !== "" && geo.radius_km !== "", [geo.lat, geo.lng, geo.radius_km]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [items, setItems] = useState([]);
   const [pageError, setPageError] = useState("");
-  const [loadingList, setLoadingList] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const [orderCropId, setOrderCropId] = useState(null);
-  const [quantityRequested, setQuantityRequested] = useState("");
-  const [contactDetails, setContactDetails] = useState("");
+  const [orderingCrop, setOrderingCrop] = useState(null);
 
-  // Module 5 fields
-  const [proposedPrice, setProposedPrice] = useState("");
-  const [deliveryNotes, setDeliveryNotes] = useState("");
-
-  const [orderErrors, setOrderErrors] = useState({});
-  const [placingOrder, setPlacingOrder] = useState(false);
-
-  const activeCrop = useMemo(() => items.find((c) => c.id === orderCropId) || null, [items, orderCropId]);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState("");
+  const [lightboxTitle, setLightboxTitle] = useState("");
 
   async function load(nextFilters = filters, nextGeo = geo) {
     setPageError("");
-    setLoadingList(true);
+    setLoading(true);
     try {
       const params = {
         ...nextFilters,
-        ...(nextGeo.lat && nextGeo.lng ? { lat: nextGeo.lat, lng: nextGeo.lng, radius_km: nextGeo.radius_km } : {}),
+        ...(nextGeo.lat && nextGeo.lng
+          ? { lat: nextGeo.lat, lng: nextGeo.lng, radius_km: nextGeo.radius_km }
+          : {}),
       };
       const res = await api.listCrops(params);
       setItems(res.items || []);
@@ -123,7 +241,7 @@ export default function BuyerBrowse() {
       setPageError(msg);
       toast.show({ type: "error", title: "Search failed", message: msg });
     } finally {
-      setLoadingList(false);
+      setLoading(false);
     }
   }
 
@@ -132,79 +250,13 @@ export default function BuyerBrowse() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function resetOrderForm() {
-    setOrderCropId(null);
-    setQuantityRequested("");
-    setContactDetails("");
-    setProposedPrice("");
-    setDeliveryNotes("");
-    setOrderErrors({});
-    setPlacingOrder(false);
-  }
-
-  function validateOrder() {
-    const next = {};
-    const qty = toNumber(quantityRequested);
-
-    if (!orderCropId) next.crop = "Select a crop first.";
-    if (Number.isNaN(qty)) next.quantity = "Quantity is required.";
-    else if (qty <= 0) next.quantity = "Quantity must be greater than 0.";
-    else if (activeCrop?.min_order_qty != null && qty < activeCrop.min_order_qty) {
-      next.quantity = `Minimum order is ${activeCrop.min_order_qty} ${activeCrop.unit}.`;
-    }
-
-    const pp = toNumber(proposedPrice);
-    if (!isBlank(proposedPrice)) {
-      if (Number.isNaN(pp)) next.proposed_price = "Proposed price must be a number.";
-      else if (pp <= 0) next.proposed_price = "Proposed price must be greater than 0.";
-    }
-
-    if (!contactDetails.trim()) next.contact = "Contact details are required (phone/email).";
-    if (deliveryNotes && deliveryNotes.length > 2000) next.delivery_notes = "Delivery notes too long (max 2000 characters).";
-
-    setOrderErrors(next);
-    return Object.keys(next).length === 0;
-  }
-
-  async function placeOrder(e) {
-    e.preventDefault();
-    setOrderErrors({});
-
-    if (!validateOrder()) return;
-
-    setPlacingOrder(true);
-    try {
-      await api.createOrder({
-        crop_id: orderCropId,
-        quantity_requested: Number(quantityRequested),
-        contact_details: contactDetails.trim(),
-        proposed_price: isBlank(proposedPrice) ? null : Number(proposedPrice),
-        delivery_notes: deliveryNotes.trim() || null,
-      });
-
-      toast.show({
-        type: "success",
-        title: "Request sent",
-        message: "The farmer will review your order request.",
-      });
-
-      resetOrderForm();
-    } catch (e2) {
-      const msg = e2?.message || "Failed to send request.";
-      toast.show({ type: "error", title: "Could not send request", message: msg });
-      setOrderErrors((p) => ({ ...p, form: msg }));
-    } finally {
-      setPlacingOrder(false);
-    }
-  }
-
-  async function onSearchClick() {
-    await load(filters, geo);
-  }
-
   function useMyLocation() {
     if (!navigator.geolocation) {
-      toast.show({ type: "error", title: "Geolocation unavailable", message: "Your browser does not support location." });
+      toast.show({
+        type: "error",
+        title: "Geolocation unavailable",
+        message: "Your browser does not support location.",
+      });
       return;
     }
 
@@ -212,8 +264,14 @@ export default function BuyerBrowse() {
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        setGeo((p) => ({ ...p, lat: String(lat), lng: String(lng) }));
-        toast.show({ type: "success", title: "Location set", message: "Distance filtering is ready." });
+        const nextGeo = { ...geo, lat: String(lat), lng: String(lng) };
+        setGeo(nextGeo);
+        load(filters, nextGeo);
+        toast.show({
+          type: "success",
+          title: "Location set",
+          message: "Now showing crops within range.",
+        });
       },
       () => {
         toast.show({
@@ -227,214 +285,273 @@ export default function BuyerBrowse() {
   }
 
   function clearDistance() {
-    setGeo((p) => ({ ...p, lat: "", lng: "" }));
+    const nextGeo = { ...geo, lat: "", lng: "" };
+    setGeo(nextGeo);
+    load(filters, nextGeo);
   }
+
+  function clearAll() {
+    const blank = { name: "", location: "", county: "", town: "", min_price: "", max_price: "" };
+    const blankGeo = { lat: "", lng: "", radius_km: "25" };
+    setFilters(blank);
+    setGeo(blankGeo);
+    load(blank, blankGeo);
+  }
+
+  async function submitOrder(payload) {
+    try {
+      await api.createOrder(payload);
+      toast.show({
+        type: "success",
+        title: "Request sent",
+        message: "The farmer will review your order.",
+      });
+      setOrderingCrop(null);
+    } catch (e) {
+      toast.show({
+        type: "error",
+        title: "Could not send request",
+        message: e?.message || "Failed to send request.",
+      });
+      throw e; // bubble back to modal so it can show inline error
+    }
+  }
+
+  function openLightbox(crop, idx) {
+    setLightboxTitle(`${crop.name} — image ${idx + 1}/${crop.images.length}`);
+    setLightboxSrc(crop.images[idx].url);
+    setLightboxOpen(true);
+  }
+
+  const hasActiveFilters = useMemo(() => {
+    return Object.values(filters).some((v) => v && String(v).trim()) || distanceEnabled;
+  }, [filters, distanceEnabled]);
 
   return (
     <div className="container">
-      <PageHeader title="Browse Crops" subtitle="Search by crop name, location, or price. Optional: filter by distance." />
+      <PageHeader
+        title="Browse crops"
+        subtitle="Find crops near you and send an order request."
+        right={
+          hasActiveFilters ? (
+            <button className="btn sm" type="button" onClick={clearAll}>
+              Clear filters
+            </button>
+          ) : null
+        }
+      />
 
-      <div className="card">
-        <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 10 }}>
-          <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Name (e.g. maize)" value={filters.name} onChange={(e) => setFilters((p) => ({ ...p, name: e.target.value }))} />
-          <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Location (e.g. Eldoret)" value={filters.location} onChange={(e) => setFilters((p) => ({ ...p, location: e.target.value }))} />
-          <input className="input" style={{ flex: 1, minWidth: 160 }} placeholder="County (optional)" value={filters.county} onChange={(e) => setFilters((p) => ({ ...p, county: e.target.value }))} />
-          <input className="input" style={{ flex: 1, minWidth: 160 }} placeholder="Town (optional)" value={filters.town} onChange={(e) => setFilters((p) => ({ ...p, town: e.target.value }))} />
-          <input className="input" style={{ flex: 1, minWidth: 140 }} placeholder="Min price" inputMode="decimal" value={filters.min_price} onChange={(e) => setFilters((p) => ({ ...p, min_price: e.target.value }))} />
-          <input className="input" style={{ flex: 1, minWidth: 140 }} placeholder="Max price" inputMode="decimal" value={filters.max_price} onChange={(e) => setFilters((p) => ({ ...p, max_price: e.target.value }))} />
-
-          <button className="btn" onClick={onSearchClick} disabled={loadingList}>
-            {loadingList ? "Searching…" : "Search"}
-          </button>
-        </div>
-
-        <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 10 }}>
-          <button className="btn" type="button" onClick={useMyLocation} disabled={loadingList}>
-            Use my location
-          </button>
-
-          <select
-            className="select"
-            value={geo.radius_km}
-            onChange={(e) => setGeo((p) => ({ ...p, radius_km: e.target.value }))}
-            disabled={!distanceEnabled}
-            title={!distanceEnabled ? "Set your location first" : ""}
+      {/* Filter toolbar */}
+      <div className="browse-toolbar">
+        <div className="browse-search-row">
+          <div className="browse-search">
+            <span className="browse-search-icon" aria-hidden="true">🔍</span>
+            <input
+              className="input"
+              type="search"
+              placeholder="Search by crop name (e.g. maize)…"
+              value={filters.name}
+              onChange={(e) => setFilters((p) => ({ ...p, name: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === "Enter") load(); }}
+            />
+          </div>
+          <button
+            className="btn primary"
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
           >
-            {RADIUS_OPTIONS.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-
-          <button className="btn" type="button" onClick={clearDistance} disabled={!distanceEnabled || loadingList}>
-            Clear distance
+            {loading ? "Searching…" : "Search"}
           </button>
-
-          {distanceEnabled && (
-            <span className="pill" title="Your location is used only to calculate approximate distance">
-              Distance: {geo.radius_km} km
-            </span>
-          )}
+          <button
+            className="btn"
+            type="button"
+            onClick={() => setShowAdvanced((s) => !s)}
+          >
+            {showAdvanced ? "Hide filters" : "More filters"}
+          </button>
         </div>
 
-        {pageError && (
-          <div className="error" style={{ marginTop: 10 }}>
-            {pageError}
+        {showAdvanced && (
+          <div className="browse-advanced">
+            <input
+              className="input"
+              placeholder="Location"
+              value={filters.location}
+              onChange={(e) => setFilters((p) => ({ ...p, location: e.target.value }))}
+            />
+            <input
+              className="input"
+              placeholder="County"
+              value={filters.county}
+              onChange={(e) => setFilters((p) => ({ ...p, county: e.target.value }))}
+            />
+            <input
+              className="input"
+              placeholder="Town"
+              value={filters.town}
+              onChange={(e) => setFilters((p) => ({ ...p, town: e.target.value }))}
+            />
+            <input
+              className="input"
+              type="number" min="0"
+              placeholder="Min price (KSh)"
+              value={filters.min_price}
+              onChange={(e) => setFilters((p) => ({ ...p, min_price: e.target.value }))}
+            />
+            <input
+              className="input"
+              type="number" min="0"
+              placeholder="Max price (KSh)"
+              value={filters.max_price}
+              onChange={(e) => setFilters((p) => ({ ...p, max_price: e.target.value }))}
+            />
           </div>
         )}
+
+        <div className="browse-distance-row">
+          {!distanceEnabled ? (
+            <button className="btn sm" type="button" onClick={useMyLocation} disabled={loading}>
+              📍 Use my location
+            </button>
+          ) : (
+            <>
+              <span className="distance-tag">📍 Within {geo.radius_km} km</span>
+              <select
+                className="select"
+                style={{ maxWidth: 140, padding: "6px 10px", fontSize: "0.8125rem" }}
+                value={geo.radius_km}
+                onChange={(e) => {
+                  const nextGeo = { ...geo, radius_km: e.target.value };
+                  setGeo(nextGeo);
+                  load(filters, nextGeo);
+                }}
+              >
+                {RADIUS_OPTIONS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+              <button className="btn sm" type="button" onClick={clearDistance}>
+                Clear
+              </button>
+            </>
+          )}
+          <span className="small" style={{ marginLeft: "auto" }}>
+            {loading ? "Loading…" : `${items.length} result${items.length === 1 ? "" : "s"}`}
+          </span>
+        </div>
       </div>
 
-      <div style={{ height: 14 }} />
-
-      {loadingList ? (
-        <div className="card">
-          <div className="small">Loading crops…</div>
+      {pageError && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="error">{pageError}</div>
         </div>
+      )}
+
+      {loading && items.length === 0 ? (
+        <div className="card"><div className="small">Loading crops…</div></div>
       ) : items.length === 0 ? (
-        <EmptyState title="No crops found" message="Try changing your search filters or clearing min/max price." />
+        <EmptyState
+          title="No crops found"
+          message="Try a different search, broaden your filters, or clear them all."
+          action={
+            hasActiveFilters ? (
+              <button className="btn primary" onClick={clearAll}>Clear filters</button>
+            ) : null
+          }
+        />
       ) : (
-        <div className="grid">
-          {items.map((c) => {
-            const isActive = orderCropId === c.id;
-            const isSubmittingThis = placingOrder && isActive;
-
-            return (
-              <div key={c.id} className="card listing-card">
-                <ListingGalleryThumbs crop={c} />
-
-                <div className="kv">
-                  <strong>{c.name}</strong>
-                  <span className="pill">
-                    KES {c.price_per_unit} / {c.unit}
-                  </span>
+        <div className="browse-grid">
+          {items.map((c) => (
+            <div key={c.id} className="card browse-card">
+              <div className="listing-head">
+                <div>
+                  <h3 className="listing-title">{c.name}</h3>
+                  <div className="row" style={{ gap: 6, marginTop: 4 }}>
+                    <span className="pill">{c.unit}</span>
+                    {typeof c.distance_km === "number" && (
+                      <span className="distance-tag">~{c.distance_km} km</span>
+                    )}
+                  </div>
                 </div>
-
-                <div className="small">
-                  Available: <b>{c.quantity}</b> {c.unit}
+                <div className="listing-price">
+                  {formatKsh(c.price_per_unit, { precise: true })}
                 </div>
+              </div>
+
+              {c.images?.length > 0 && (
+                <div className="thumb-row" aria-label="Listing thumbnails">
+                  {c.images.map((img, idx) => (
+                    <div
+                      key={img.id ?? `${img.url}-${idx}`}
+                      className="thumb"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openLightbox(c, idx)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") openLightbox(c, idx);
+                      }}
+                      title={`Open image ${idx + 1}`}
+                    >
+                      <img src={img.url} alt={`${c.name} thumbnail ${idx + 1}`} loading="lazy" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <dl className="stat-list" style={{ marginTop: 12 }}>
+                <dt>Available</dt>
+                <dd>{formatNumber(c.quantity)} {c.unit}</dd>
 
                 {c.min_order_qty != null && (
-                  <div className="small">
-                    Min order: <b>{c.min_order_qty}</b> {c.unit}
-                  </div>
+                  <>
+                    <dt>Min order</dt>
+                    <dd>{formatNumber(c.min_order_qty)} {c.unit}</dd>
+                  </>
                 )}
 
                 {c.pack_size_kg != null && (
-                  <div className="small">
-                    Pack size: <b>{c.pack_size_kg}</b> kg
-                  </div>
+                  <>
+                    <dt>Pack size</dt>
+                    <dd>{formatNumber(c.pack_size_kg)} kg</dd>
+                  </>
                 )}
 
-                <div className="small">Location: {c.location}</div>
+                <dt>Location</dt>
+                <dd>{[c.town, c.county].filter(Boolean).join(", ") || c.location}</dd>
 
-                {(c.town || c.county) && (
-                  <div className="small">
-                    Area: {[c.town, c.county].filter(Boolean).join(", ")}
-                  </div>
-                )}
+                <dt>Farmer</dt>
+                <dd>{c.farmer?.name || "—"}</dd>
+              </dl>
 
-                {typeof c.distance_km === "number" && (
-                  <div className="small">
-                    Distance: <b>~{c.distance_km} km</b>
-                  </div>
-                )}
-
-                <div className="small" style={{ marginTop: 6 }}>
-                  Farmer: {c.farmer?.name} • {c.farmer?.phone || "no phone"} • {c.farmer?.email}
-                </div>
-
-                <div className="small" style={{ marginTop: 6 }}>
-                  Pickup pin: {c.has_location ? "available after acceptance" : "not available"}
-                </div>
-
-                <div className="row" style={{ marginTop: 10 }}>
-                  <button className="btn primary" onClick={() => setOrderCropId(c.id)} disabled={isSubmittingThis}>
-                    {isSubmittingThis ? "Sending…" : "Request Order"}
-                  </button>
-                  <span className="pill">Unit: {c.unit}</span>
-                </div>
-
-                {isActive && (
-                  <form onSubmit={placeOrder} className="grid" style={{ marginTop: 12 }} noValidate>
-                    {c.min_order_qty != null && (
-                      <div className="small">
-                        Minimum order is <b>{c.min_order_qty}</b> {c.unit}.
-                      </div>
-                    )}
-
-                    <div className="grid">
-                      <label>Quantity requested ({c.unit})</label>
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder={`e.g. 10 (${c.unit})`}
-                        value={quantityRequested}
-                        onChange={(e) => setQuantityRequested(e.target.value)}
-                        aria-invalid={Boolean(orderErrors.quantity)}
-                      />
-                      {orderErrors.quantity && <div className="error">{orderErrors.quantity}</div>}
-                    </div>
-
-                    <div className="grid">
-                      <label>Proposed price (optional)</label>
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder={`e.g. ${c.price_per_unit}`}
-                        value={proposedPrice}
-                        onChange={(e) => setProposedPrice(e.target.value)}
-                        aria-invalid={Boolean(orderErrors.proposed_price)}
-                      />
-                      {orderErrors.proposed_price && <div className="error">{orderErrors.proposed_price}</div>}
-                      <div className="small">Leave blank to accept the listed price.</div>
-                    </div>
-
-                    <div className="grid">
-                      <label>Delivery notes (optional)</label>
-                      <textarea
-                        className="textarea"
-                        placeholder="Notes for the farmer (e.g. preferred pickup time)."
-                        value={deliveryNotes}
-                        onChange={(e) => setDeliveryNotes(e.target.value)}
-                        aria-invalid={Boolean(orderErrors.delivery_notes)}
-                      />
-                      {orderErrors.delivery_notes && <div className="error">{orderErrors.delivery_notes}</div>}
-                    </div>
-
-                    <div className="grid">
-                      <label>Contact details</label>
-                      <textarea
-                        className="textarea"
-                        placeholder="Phone/email + notes"
-                        value={contactDetails}
-                        onChange={(e) => setContactDetails(e.target.value)}
-                        aria-invalid={Boolean(orderErrors.contact)}
-                      />
-                      {orderErrors.contact && <div className="error">{orderErrors.contact}</div>}
-                    </div>
-
-                    {orderErrors.form && <div className="error">{orderErrors.form}</div>}
-
-                    <div className="row">
-                      <button className="btn primary" type="submit" disabled={placingOrder}>
-                        {placingOrder ? "Sending…" : "Send request"}
-                      </button>
-                      <button className="btn" type="button" onClick={resetOrderForm} disabled={placingOrder}>
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                )}
+              <div className="browse-card-footer">
+                <button
+                  className="btn primary"
+                  style={{ width: "100%" }}
+                  type="button"
+                  onClick={() => setOrderingCrop(c)}
+                >
+                  Request order
+                </button>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
+
+      <OrderRequestModal
+        crop={orderingCrop}
+        open={Boolean(orderingCrop)}
+        onClose={() => setOrderingCrop(null)}
+        onSubmit={submitOrder}
+      />
+
+      <Lightbox
+        open={lightboxOpen}
+        title={lightboxTitle}
+        src={lightboxSrc}
+        onClose={() => setLightboxOpen(false)}
+      />
     </div>
   );
 }
