@@ -170,6 +170,7 @@ ADMIN_EMAIL=admin@local.test
 ADMIN_PASSWORD=Admin123!
 ```
 
+
 If your frontend runs on a different port, add it to `CORS_ORIGINS` (comma-separated).
 
 ---
